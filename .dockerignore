@@ -1,0 +1,9 @@
+.git
+.agenttester
+_plans
+__pycache__
+*.egg-info
+dist
+.venv
+*.pyc
+agenttester-report-*.md

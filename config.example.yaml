@@ -1,0 +1,46 @@
+# AgentTester configuration
+# Copy to agenttester.yaml in your target repo.
+# Entries here override built-in presets (claude, aider, codex).
+#
+# host: "localhost" (default) runs locally; set to "user@server" for SSH.
+
+agents:
+  claude:
+    command: 'claude -p {prompt} --allowedTools "Bash,Read,Edit" --permission-mode acceptEdits'
+    host: localhost
+    commit_style: auto    # agent commits its own changes
+    timeout: 600
+
+  aider:
+    command: "aider --yes-always --no-auto-commits --message {prompt}"
+    host: localhost
+    commit_style: manual  # agenttester commits changes after the agent exits
+    timeout: 600
+
+  codex:
+    command: "codex exec --sandbox danger-full-access {prompt}"
+    host: localhost
+    commit_style: auto
+    timeout: 600
+
+  # Example: agent running on a remote GPU box
+  # remote-claude:
+  #   command: 'claude -p {prompt} --allowedTools "Bash,Read,Edit"'
+  #   host: user@gpu-server
+  #   remote_workdir: /home/user/agenttester
+  #   commit_style: auto
+  #   timeout: 900
+
+  # Example: custom agent with API key forwarding
+  # my-agent:
+  #   command: "my-agent --input {prompt_file} --auto"
+  #   host: localhost
+  #   commit_style: manual
+  #   timeout: 300
+  #   env:
+  #     MY_AGENT_API_KEY: "..."
+
+  # Example: agent that reads prompt from stdin (no placeholders)
+  # stdin-agent:
+  #   command: "some-agent --non-interactive"
+  #   commit_style: manual

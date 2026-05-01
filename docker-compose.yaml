@@ -1,0 +1,14 @@
+services:
+  agenttester:
+    build: .
+    volumes:
+      - ${REPO_PATH:-.}:/repo
+      # Forward SSH agent for remote execution
+      - ${SSH_AUTH_SOCK:-/dev/null}:/ssh-agent
+      # Share host SSH config for remote hosts
+      - ~/.ssh:/root/.ssh:ro
+    environment:
+      - SSH_AUTH_SOCK=/ssh-agent
+      # Pass API keys through to agents
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
