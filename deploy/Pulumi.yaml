@@ -1,0 +1,6 @@
+name: agenttester-infra
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: AWS infrastructure for agenttester remote agent execution
