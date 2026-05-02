@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
+import git
 import pytest
 
 from agenttester.config import AgentConfig
@@ -13,28 +13,13 @@ from agenttester.config import AgentConfig
 @pytest.fixture()
 def tmp_git_repo(tmp_path: Path) -> Path:
     """Create a temporary git repo with an initial commit."""
-    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@test.com"],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test"],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-    )
-    # Create an initial file and commit
+    repo = git.Repo.init(tmp_path)
+    with repo.config_writer() as cfg:
+        cfg.set_value("user", "email", "test@test.com")
+        cfg.set_value("user", "name", "Test")
     (tmp_path / "README.md").write_text("# test repo\n")
-    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "initial"],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-    )
+    repo.index.add(["README.md"])
+    repo.index.commit("initial")
     return tmp_path
 
 

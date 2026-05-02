@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import git
 
 from agenttester.git_manager import GitManager
 
@@ -14,7 +16,7 @@ class TestHasCommits:
         assert gm.has_commits()
 
     def test_empty_repo(self, tmp_path: Path) -> None:
-        subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+        git.Repo.init(tmp_path)
         gm = GitManager(tmp_path)
         assert not gm.has_commits()
 
@@ -37,13 +39,9 @@ class TestCreateWorktree:
     def test_creates_branch(self, tmp_git_repo: Path) -> None:
         gm = GitManager(tmp_git_repo)
         gm.create_worktree("testagent", "run123")
-        result = subprocess.run(
-            ["git", "branch", "--list", "agenttester/run123/testagent"],
-            cwd=tmp_git_repo,
-            capture_output=True,
-            text=True,
-        )
-        assert "agenttester/run123/testagent" in result.stdout
+        repo = git.Repo(tmp_git_repo)
+        branch_names = [b.name for b in repo.branches]
+        assert "agenttester/run123/testagent" in branch_names
 
 
 class TestCommitAll:
@@ -103,3 +101,45 @@ class TestCleanup:
     def test_cleanup_nonexistent_run(self, tmp_git_repo: Path) -> None:
         gm = GitManager(tmp_git_repo)
         gm.cleanup_run("doesnotexist")  # should not raise
+
+
+class TestApplyEnv:
+    def _make_repo(self) -> MagicMock:
+        repo = MagicMock(spec=git.Repo)
+        repo.git = MagicMock()
+        repo.git.update_environment = MagicMock()
+        return repo
+
+    def test_sets_git_ssh_command_when_config_exists(self, tmp_path: Path) -> None:
+        ssh_config = tmp_path / ".ssh" / "config"
+        ssh_config.parent.mkdir()
+        ssh_config.write_text("")
+        repo = self._make_repo()
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "agenttester.git_manager.Path.home", return_value=tmp_path
+        ):
+            GitManager._apply_env(repo)
+        called_env = repo.git.update_environment.call_args[1]
+        assert called_env["GIT_SSH_COMMAND"] == f"ssh -F {ssh_config}"
+
+    def test_no_git_ssh_command_when_config_missing(self, tmp_path: Path) -> None:
+        repo = self._make_repo()
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "agenttester.git_manager.Path.home", return_value=tmp_path
+        ):
+            GitManager._apply_env(repo)
+        called_env = repo.git.update_environment.call_args[1]
+        assert "GIT_SSH_COMMAND" not in called_env
+
+    def test_existing_git_ssh_command_not_overridden(self, tmp_path: Path) -> None:
+        ssh_config = tmp_path / ".ssh" / "config"
+        ssh_config.parent.mkdir()
+        ssh_config.write_text("")
+        repo = self._make_repo()
+        existing = "ssh -i /custom/key"
+        with patch.dict("os.environ", {"GIT_SSH_COMMAND": existing}, clear=True), patch(
+            "agenttester.git_manager.Path.home", return_value=tmp_path
+        ):
+            GitManager._apply_env(repo)
+        called_env = repo.git.update_environment.call_args[1]
+        assert called_env["GIT_SSH_COMMAND"] == existing

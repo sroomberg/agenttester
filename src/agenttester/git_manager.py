@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import re
-import subprocess
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import git
+from git.exc import GitCommandError
 
 
 @dataclass
@@ -25,36 +29,38 @@ class GitManager:
     def __init__(self, repo_path: Path) -> None:
         self.repo_path = repo_path
         self.worktree_base = repo_path / ".agenttester" / "worktrees"
+        self.repo = git.Repo(repo_path)
+        self._apply_env(self.repo)
 
-    def _git(
-        self, *args: str, cwd: Path | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", *args],
-            cwd=cwd or self.repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+    @staticmethod
+    def _apply_env(repo: git.Repo) -> None:
+        """Inherit the full shell environment so SSH keys and config are available."""
+        env = {k: v for k, v in os.environ.items() if k.isidentifier()}
+        if "GIT_SSH_COMMAND" not in env:
+            ssh_config = Path.home() / ".ssh" / "config"
+            if ssh_config.exists():
+                env["GIT_SSH_COMMAND"] = f"ssh -F {shlex.quote(str(ssh_config))}"
+
+        repo.git.update_environment(**env)
 
     def has_commits(self) -> bool:
         """Check if the repo has at least one commit."""
         try:
-            self._git("rev-parse", "HEAD")
-        except subprocess.CalledProcessError:
+            self.repo.git.rev_parse("HEAD")
+        except GitCommandError:
             return False
         return True
 
     def get_head_ref(self) -> str:
         """Return the current HEAD commit SHA."""
-        return self._git("rev-parse", "HEAD").stdout.strip()
+        return self.repo.head.commit.hexsha
 
     def create_worktree(self, agent_name: str, run_id: str) -> Path:
         """Create a worktree with a new branch for an agent run."""
         branch = f"agenttester/{run_id}/{agent_name}"
         worktree_path = self.worktree_base / run_id / agent_name
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
-        self._git("worktree", "add", "-b", branch, str(worktree_path))
+        self.repo.git.worktree("add", "-b", branch, str(worktree_path))
         return worktree_path
 
     def commit_all(self, worktree_path: Path, agent_name: str) -> bool:
@@ -62,25 +68,19 @@ class GitManager:
 
         Returns True if a commit was created.
         """
-        self._git("add", "-A", cwd=worktree_path)
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"],
-            cwd=worktree_path,
-            capture_output=True,
-        )
-        if result.returncode == 0:
+        wt_repo = git.Repo(worktree_path)
+        self._apply_env(wt_repo)
+        wt_repo.git.add("-A")
+        if not wt_repo.index.diff("HEAD"):
             return False
-        self._git(
-            "commit", "-m", f"agenttester: {agent_name} changes", cwd=worktree_path
-        )
+        wt_repo.index.commit(f"agenttester: {agent_name} changes")
         return True
 
     def get_diff_stats(self, run_id: str, agent_name: str, base_ref: str) -> DiffStats:
         """Get diff statistics between the base ref and an agent's branch."""
         branch = f"agenttester/{run_id}/{agent_name}"
         try:
-            result = self._git("diff", "--shortstat", base_ref, branch)
-            stat_line = result.stdout.strip()
+            stat_line = self.repo.git.diff("--shortstat", base_ref, branch)
 
             files_changed = insertions = deletions = 0
             if stat_line:
@@ -91,8 +91,8 @@ class GitManager:
                 if m := re.search(r"(\d+) deletion", stat_line):
                     deletions = int(m.group(1))
 
-            result = self._git("diff", "--name-only", base_ref, branch)
-            changed_files = [f for f in result.stdout.strip().split("\n") if f]
+            name_only = self.repo.git.diff("--name-only", base_ref, branch)
+            changed_files = [f for f in name_only.strip().split("\n") if f]
 
             return DiffStats(
                 files_changed=files_changed,
@@ -100,14 +100,14 @@ class GitManager:
                 deletions=deletions,
                 changed_files=changed_files,
             )
-        except subprocess.CalledProcessError:
+        except GitCommandError:
             return DiffStats()
 
     def cleanup_worktree(self, run_id: str, agent_name: str) -> None:
         """Remove a single worktree."""
         worktree_path = self.worktree_base / run_id / agent_name
         if worktree_path.exists():
-            self._git("worktree", "remove", str(worktree_path), "--force")
+            self.repo.git.worktree("remove", str(worktree_path), "--force")
 
     def cleanup_run(self, run_id: str) -> None:
         """Remove all worktrees for a run. Branches are preserved."""
@@ -116,8 +116,8 @@ class GitManager:
             return
         for agent_dir in sorted(run_dir.iterdir()):
             if agent_dir.is_dir():
-                with contextlib.suppress(subprocess.CalledProcessError):
-                    self._git("worktree", "remove", str(agent_dir), "--force")
+                with contextlib.suppress(GitCommandError):
+                    self.repo.git.worktree("remove", str(agent_dir), "--force")
         for d in (run_dir, self.worktree_base):
             with contextlib.suppress(OSError):
                 d.rmdir()
