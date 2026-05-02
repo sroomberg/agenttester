@@ -13,12 +13,20 @@ Pulumi project that provisions EC2 instances pre-configured to run coding agents
 ```bash
 cd deploy
 pulumi stack init dev
+
+# Required: restrict SSH access to your IP
+pulumi config set --path 'allowed_ssh_cidrs[0]' "$(curl -s ifconfig.me)/32"
+
 pulumi up
 ```
 
 ## Configuration
 
 ```bash
+# REQUIRED: CIDR blocks allowed to SSH into the instances
+pulumi config set --path 'allowed_ssh_cidrs[0]' "203.0.113.10/32"
+pulumi config set --path 'allowed_ssh_cidrs[1]' "10.0.0.0/8"  # e.g. VPN range
+
 # Instance type (default: t3.large)
 pulumi config set instance_type t3.xlarge
 
@@ -62,7 +70,7 @@ agents:
 ## What gets provisioned
 
 - **EC2 instances** (Ubuntu 22.04) with 50 GB gp3 root volume
-- **Security group** allowing SSH inbound + all outbound
+- **Security group** allowing SSH inbound from `allowed_ssh_cidrs` only, all outbound
 - **IAM role + instance profile** with SSM access (for debugging via Session Manager)
 - **Key pair** from your local SSH public key
 - **User data** that installs git, rsync, Node.js 20, Claude Code, Codex CLI, and Aider

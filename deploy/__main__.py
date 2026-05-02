@@ -11,6 +11,7 @@ config = pulumi.Config()
 instance_type = config.get("instance_type") or "t3.large"
 instance_count = config.get_int("instance_count") or 1
 ssh_pub_key_path = config.get("ssh_public_key_path") or "~/.ssh/id_ed25519.pub"
+allowed_ssh_cidrs = config.require_object("allowed_ssh_cidrs")
 
 ssh_pub_key = Path(ssh_pub_key_path).expanduser().read_text().strip()
 
@@ -48,7 +49,7 @@ sg = aws.ec2.SecurityGroup(
             protocol="tcp",
             from_port=22,
             to_port=22,
-            cidr_blocks=["0.0.0.0/0"],
+            cidr_blocks=allowed_ssh_cidrs,
             description="SSH",
         ),
     ],
