@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import re
+
 from typer.testing import CliRunner
 
 from agenttester.cli import app
 
-runner = CliRunner(env={"NO_COLOR": "1"})
+runner = CliRunner()
+
+
+def strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*[mGKHF]", "", text)
 
 
 class TestHelpCommands:
@@ -19,8 +25,9 @@ class TestHelpCommands:
     def test_run_help(self) -> None:
         result = runner.invoke(app, ["run", "--help"])
         assert result.exit_code == 0
-        assert "--agents" in result.output
-        assert "--prompt-file" in result.output
+        output = strip_ansi(result.output)
+        assert "--agents" in output
+        assert "--prompt-file" in output
 
     def test_agents_help(self) -> None:
         result = runner.invoke(app, ["agents", "--help"])
