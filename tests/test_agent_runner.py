@@ -73,7 +73,7 @@ class TestPrepareCommand:
 
     def test_escapes_special_characters(self) -> None:
         agent = AgentConfig(name="t", command="echo {prompt}")
-        cmd, _, _ = _prepare_command(agent, "it's a \"test\"")
+        cmd, _, _ = _prepare_command(agent, 'it\'s a "test"')
         assert "it" in cmd
         assert "test" in cmd
 
@@ -95,9 +95,7 @@ class TestPrepareCommand:
         assert pipe_stdin
 
     def test_both_placeholders(self) -> None:
-        agent = AgentConfig(
-            name="t", command="agent {prompt} --file {prompt_file}"
-        )
+        agent = AgentConfig(name="t", command="agent {prompt} --file {prompt_file}")
         cmd, prompt_file, pipe_stdin = _prepare_command(agent, "hello")
         assert "hello" in cmd
         assert prompt_file is not None
@@ -120,9 +118,7 @@ class TestRunAgentLocal:
             "agenttester.agent_runner.asyncio.create_subprocess_shell",
             return_value=proc,
         ):
-            result = await run_agent(
-                agent, tmp_path, "hello", console, "cyan", lock
-            )
+            result = await run_agent(agent, tmp_path, "hello", console, "cyan", lock)
 
         assert result.exit_code == 0
         assert result.error is None
@@ -134,17 +130,13 @@ class TestRunAgentLocal:
         self, tmp_path: Path, console: Console, lock: asyncio.Lock
     ) -> None:
         agent = AgentConfig(name="test", command="echo {prompt}", timeout=10)
-        proc = _make_mock_proc(
-            returncode=0, stdout_lines=[b"line1\n", b"line2\n"]
-        )
+        proc = _make_mock_proc(returncode=0, stdout_lines=[b"line1\n", b"line2\n"])
 
         with patch(
             "agenttester.agent_runner.asyncio.create_subprocess_shell",
             return_value=proc,
         ):
-            result = await run_agent(
-                agent, tmp_path, "go", console, "cyan", lock
-            )
+            result = await run_agent(agent, tmp_path, "go", console, "cyan", lock)
 
         assert "line1" in result.stdout
         assert "line2" in result.stdout
@@ -160,9 +152,7 @@ class TestRunAgentLocal:
             "agenttester.agent_runner.asyncio.create_subprocess_shell",
             return_value=proc,
         ):
-            result = await run_agent(
-                agent, tmp_path, "go", console, "cyan", lock
-            )
+            result = await run_agent(agent, tmp_path, "go", console, "cyan", lock)
 
         assert "warning" in result.stderr
 
@@ -177,9 +167,7 @@ class TestRunAgentLocal:
             "agenttester.agent_runner.asyncio.create_subprocess_shell",
             return_value=proc,
         ):
-            result = await run_agent(
-                agent, tmp_path, "", console, "cyan", lock
-            )
+            result = await run_agent(agent, tmp_path, "", console, "cyan", lock)
 
         assert result.exit_code == 42
 
@@ -263,9 +251,7 @@ class TestRunAgentTimeout:
             ),
             patch("agenttester.agent_runner._kill_proc_tree") as mock_kill,
         ):
-            result = await run_agent(
-                agent, tmp_path, "go", console, "cyan", lock
-            )
+            result = await run_agent(agent, tmp_path, "go", console, "cyan", lock)
 
         assert result.exit_code == -1
         assert "Timed out" in result.error
@@ -293,9 +279,7 @@ class TestRunAgentRemote:
                 return_value=proc,
             ) as mock_create,
         ):
-            result = await run_agent(
-                agent, tmp_path, "go", console, "cyan", lock
-            )
+            result = await run_agent(agent, tmp_path, "go", console, "cyan", lock)
 
         assert result.exit_code == 0
         cmd_str = mock_create.call_args[0][0]

@@ -115,8 +115,9 @@ class TestApplyEnv:
         ssh_config.parent.mkdir()
         ssh_config.write_text("")
         repo = self._make_repo()
-        with patch.dict("os.environ", {}, clear=True), patch(
-            "agenttester.git_manager.Path.home", return_value=tmp_path
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("agenttester.git_manager.Path.home", return_value=tmp_path),
         ):
             GitManager._apply_env(repo)
         called_env = repo.git.update_environment.call_args[1]
@@ -124,8 +125,9 @@ class TestApplyEnv:
 
     def test_no_git_ssh_command_when_config_missing(self, tmp_path: Path) -> None:
         repo = self._make_repo()
-        with patch.dict("os.environ", {}, clear=True), patch(
-            "agenttester.git_manager.Path.home", return_value=tmp_path
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("agenttester.git_manager.Path.home", return_value=tmp_path),
         ):
             GitManager._apply_env(repo)
         called_env = repo.git.update_environment.call_args[1]
@@ -137,8 +139,9 @@ class TestApplyEnv:
         ssh_config.write_text("")
         repo = self._make_repo()
         existing = "ssh -i /custom/key"
-        with patch.dict("os.environ", {"GIT_SSH_COMMAND": existing}, clear=True), patch(
-            "agenttester.git_manager.Path.home", return_value=tmp_path
+        with (
+            patch.dict("os.environ", {"GIT_SSH_COMMAND": existing}, clear=True),
+            patch("agenttester.git_manager.Path.home", return_value=tmp_path),
         ):
             GitManager._apply_env(repo)
         called_env = repo.git.update_environment.call_args[1]
