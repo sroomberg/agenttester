@@ -122,7 +122,9 @@ def run(
 
 @app.command()
 def query(
-    endpoint: Annotated[str, typer.Argument(help="vLLM server endpoint (http://HOST:PORT)")],
+    endpoint: Annotated[
+        str, typer.Argument(help="vLLM server endpoint (http://HOST:PORT)")
+    ],
     model_id: Annotated[str, typer.Argument(help="Model ID served by the endpoint")],
     prompt: Annotated[str, typer.Argument(help="Prompt to send")],
     max_tokens: Annotated[

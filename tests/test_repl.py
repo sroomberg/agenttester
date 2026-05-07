@@ -13,8 +13,10 @@ from agenttester.repl import Model, _query_all, _query_sync, load_models
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_config(tmp_path: Path, agents: dict) -> Path:
     import yaml
+
     p = tmp_path / "agenttester.yaml"
     p.write_text(yaml.dump({"agents": agents}))
     return p
@@ -28,54 +30,69 @@ def _vllm_command(endpoint: str, model_id: str) -> str:
 # load_models
 # ---------------------------------------------------------------------------
 
+
 class TestLoadModels:
     def test_returns_empty_when_no_config(self, tmp_path: Path) -> None:
         models = load_models(tmp_path / "missing.yaml")
         assert models == {}
 
     def test_discovers_vllm_agent(self, tmp_path: Path) -> None:
-        cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}
-        })
+        cfg = _make_config(
+            tmp_path,
+            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
+        )
         models = load_models(cfg)
         assert "llama3" in models
 
     def test_extracts_endpoint_and_model_id(self, tmp_path: Path) -> None:
-        cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}
-        })
+        cfg = _make_config(
+            tmp_path,
+            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
+        )
         m = load_models(cfg)["llama3"]
         assert m.endpoint == "http://h:8001"
         assert m.model_id == "llama/Llama-3-8B"
 
     def test_ignores_non_vllm_agents(self, tmp_path: Path) -> None:
-        cfg = _make_config(tmp_path, {
-            "claude": {"command": "claude -p {prompt}"},
-            "aider": {"command": "aider --message {prompt}"},
-            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")},
-        })
+        cfg = _make_config(
+            tmp_path,
+            {
+                "claude": {"command": "claude -p {prompt}"},
+                "aider": {"command": "aider --message {prompt}"},
+                "llama3": {
+                    "command": _vllm_command("http://h:8001", "llama/Llama-3-8B")
+                },
+            },
+        )
         models = load_models(cfg)
         assert set(models) == {"llama3"}
 
     def test_discovers_multiple_vllm_agents(self, tmp_path: Path) -> None:
-        cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")},
-            "mistral": {"command": _vllm_command("http://h:8002", "mistral/M-7B")},
-            "qwen": {"command": _vllm_command("http://h:8003", "Qwen/Qwen2.5-7B")},
-        })
+        cfg = _make_config(
+            tmp_path,
+            {
+                "llama3": {
+                    "command": _vllm_command("http://h:8001", "llama/Llama-3-8B")
+                },
+                "mistral": {"command": _vllm_command("http://h:8002", "mistral/M-7B")},
+                "qwen": {"command": _vllm_command("http://h:8003", "Qwen/Qwen2.5-7B")},
+            },
+        )
         models = load_models(cfg)
         assert set(models) == {"llama3", "mistral", "qwen"}
 
     def test_model_starts_with_empty_history(self, tmp_path: Path) -> None:
-        cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}
-        })
+        cfg = _make_config(
+            tmp_path,
+            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
+        )
         assert load_models(cfg)["llama3"].messages == []
 
 
 # ---------------------------------------------------------------------------
 # _query_sync
 # ---------------------------------------------------------------------------
+
 
 class TestQuerySync:
     def test_appends_user_and_assistant_messages(self) -> None:
@@ -141,6 +158,7 @@ class TestQuerySync:
 # ---------------------------------------------------------------------------
 # _query_all
 # ---------------------------------------------------------------------------
+
 
 class TestQueryAll:
     async def test_queries_all_models(self) -> None:

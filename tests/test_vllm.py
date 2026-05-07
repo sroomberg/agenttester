@@ -14,9 +14,9 @@ from agenttester.vllm import query
 
 def _mock_urlopen(content: str) -> MagicMock:
     mock = MagicMock()
-    mock.__enter__.return_value.read.return_value = json.dumps({
-        "choices": [{"message": {"role": "assistant", "content": content}}]
-    }).encode()
+    mock.__enter__.return_value.read.return_value = json.dumps(
+        {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    ).encode()
     return mock
 
 

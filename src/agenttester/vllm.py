@@ -18,11 +18,13 @@ def query(
 
     Raises urllib.error.HTTPError or OSError on failure.
     """
-    payload = json.dumps({
-        "model": model_id,
-        "messages": messages,
-        "max_tokens": max_tokens,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": model_id,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+    ).encode()
     req = urllib.request.Request(
         f"{endpoint.rstrip('/')}/v1/chat/completions",
         data=payload,
