@@ -9,8 +9,12 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+import urllib.error
+
 from .config import load_config
 from .orchestrator import Orchestrator
+from .repl import run_repl
+from .vllm import query as _vllm_query
 
 app = typer.Typer(
     name="agenttester",
@@ -115,6 +119,37 @@ def run(
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from e
+
+
+@app.command()
+def query(
+    endpoint: Annotated[str, typer.Argument(help="vLLM server endpoint (http://HOST:PORT)")],
+    model_id: Annotated[str, typer.Argument(help="Model ID served by the endpoint")],
+    prompt: Annotated[str, typer.Argument(help="Prompt to send")],
+    max_tokens: Annotated[int, typer.Option("--max-tokens", help="Maximum tokens to generate")] = 2048,
+) -> None:
+    """Query a vLLM model server and print the response."""
+    try:
+        result = _vllm_query(endpoint, model_id, [{"role": "user", "content": prompt}], max_tokens)
+        console.print(result)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        console.print(f"[red]HTTP {e.code}: {body}[/red]")
+        raise typer.Exit(1)
+    except OSError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def repl(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to config YAML file"),
+    ] = None,
+) -> None:
+    """Start an interactive REPL across all vLLM model agents."""
+    asyncio.run(run_repl(config))
 
 
 @app.command("agents")

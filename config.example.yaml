@@ -44,3 +44,25 @@ agents:
   # stdin-agent:
   #   command: "some-agent --non-interactive"
   #   commit_style: manual
+
+  # --- vLLM model servers on a remote EC2 host ---
+  # Deploy the host with: python setup/aws_single_host.py (in MultiAgentTrainer)
+  # Then replace HOST_IP with the public IP printed by that script.
+
+  # llama3:
+  #   command: 'agenttester query http://HOST_IP:8001 meta-llama/Meta-Llama-3-8B-Instruct {prompt}'
+  #   host: localhost
+  #   commit_style: manual
+  #   timeout: 120
+
+  # mistral:
+  #   command: 'agenttester query http://HOST_IP:8002 mistralai/Mistral-7B-Instruct-v0.2 {prompt}'
+  #   host: localhost
+  #   commit_style: manual
+  #   timeout: 120
+
+  # qwen:
+  #   command: 'agenttester query http://HOST_IP:8003 Qwen/Qwen2.5-7B-Instruct {prompt}'
+  #   host: localhost
+  #   commit_style: manual
+  #   timeout: 120

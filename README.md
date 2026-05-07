@@ -60,6 +60,22 @@ Copy `config.example.yaml` to `agenttester.yaml` in your target repo to customiz
 | `timeout` | Max seconds before the agent is killed | `600` |
 | `env` | Extra environment variables (key-value map) | `{}` |
 
+## Interactive Model REPL
+
+For comparing responses from vLLM model servers interactively, with persistent
+conversation history within a session:
+
+```bash
+agenttester repl                        # auto-discovers agenttester.yaml
+agenttester repl --config custom.yaml   # explicit config path
+```
+
+The REPL discovers any agent in your config whose command uses `query_model.py`,
+fans out each prompt to all of them in parallel, and maintains separate
+conversation history per model. Use `/reset` to clear history or `exit` to quit.
+
+See `config.example.yaml` for example vLLM agent entries.
+
 ## Development
 
 ```bash
