@@ -7,10 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from agenttester.repl import Model, _query_all, _query_sync, load_models
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -38,40 +35,40 @@ class TestLoadModels:
 
     def test_discovers_vllm_agent(self, tmp_path: Path) -> None:
         cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://1.2.3.4:8001", "meta-llama/Llama-3-8B")}
+            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}
         })
         models = load_models(cfg)
         assert "llama3" in models
 
     def test_extracts_endpoint_and_model_id(self, tmp_path: Path) -> None:
         cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://1.2.3.4:8001", "meta-llama/Llama-3-8B")}
+            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}
         })
         m = load_models(cfg)["llama3"]
-        assert m.endpoint == "http://1.2.3.4:8001"
-        assert m.model_id == "meta-llama/Llama-3-8B"
+        assert m.endpoint == "http://h:8001"
+        assert m.model_id == "llama/Llama-3-8B"
 
     def test_ignores_non_vllm_agents(self, tmp_path: Path) -> None:
         cfg = _make_config(tmp_path, {
             "claude": {"command": "claude -p {prompt}"},
             "aider": {"command": "aider --message {prompt}"},
-            "llama3": {"command": _vllm_command("http://1.2.3.4:8001", "meta-llama/Llama-3-8B")},
+            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")},
         })
         models = load_models(cfg)
         assert set(models) == {"llama3"}
 
     def test_discovers_multiple_vllm_agents(self, tmp_path: Path) -> None:
         cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://1.2.3.4:8001", "meta-llama/Llama-3-8B")},
-            "mistral": {"command": _vllm_command("http://1.2.3.4:8002", "mistralai/Mistral-7B")},
-            "qwen": {"command": _vllm_command("http://1.2.3.4:8003", "Qwen/Qwen2.5-7B")},
+            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")},
+            "mistral": {"command": _vllm_command("http://h:8002", "mistral/M-7B")},
+            "qwen": {"command": _vllm_command("http://h:8003", "Qwen/Qwen2.5-7B")},
         })
         models = load_models(cfg)
         assert set(models) == {"llama3", "mistral", "qwen"}
 
     def test_model_starts_with_empty_history(self, tmp_path: Path) -> None:
         cfg = _make_config(tmp_path, {
-            "llama3": {"command": _vllm_command("http://1.2.3.4:8001", "meta-llama/Llama-3-8B")}
+            "llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}
         })
         assert load_models(cfg)["llama3"].messages == []
 
@@ -149,7 +146,7 @@ class TestQueryAll:
     async def test_queries_all_models(self) -> None:
         models = {
             "llama3": Model(name="llama3", endpoint="http://a:8001", model_id="llama"),
-            "mistral": Model(name="mistral", endpoint="http://a:8002", model_id="mistral"),
+            "mistral": Model(name="mistral", endpoint="http://a:8002", model_id="m"),
         }
         with patch("agenttester.repl._vllm_query", return_value="ok"):
             results = await _query_all(models, "hello")

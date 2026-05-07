@@ -75,7 +75,7 @@ async def _query_all(models: dict[str, Model], prompt: str) -> dict[str, str]:
     results = await asyncio.gather(*tasks.values(), return_exceptions=True)
     return {
         name: str(r) if isinstance(r, Exception) else r
-        for name, r in zip(tasks.keys(), results)
+        for name, r in zip(tasks.keys(), results, strict=True)
     }
 
 
@@ -85,12 +85,14 @@ async def run_repl(config_path: Path | None = None) -> None:
     if not models:
         console.print("[red]No vLLM model agents found in config.[/red]")
         console.print(
-            "Add agents using 'query_model.py' commands to your agenttester.yaml."
+            "Add agents using 'agenttester query' commands to your agenttester.yaml."
         )
         return
 
     console.print(f"[bold]Models:[/bold] {', '.join(models)}")
-    console.print("[dim]Commands: /reset (clear history), exit or Ctrl-C to quit[/dim]\n")
+    console.print(
+        "[dim]Commands: /reset (clear history), exit or Ctrl-C to quit[/dim]\n"
+    )
 
     while True:
         try:
@@ -113,5 +115,7 @@ async def run_repl(config_path: Path | None = None) -> None:
         console.print()
         responses = await _query_all(models, prompt)
         for name, reply in responses.items():
-            console.print(Panel(reply, title=f"[bold]{name}[/bold]", border_style="blue"))
+            console.print(
+                Panel(reply, title=f"[bold]{name}[/bold]", border_style="blue")
+            )
         console.print()

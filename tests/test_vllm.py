@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
-import urllib.error
 
 from agenttester.vllm import query
 
@@ -22,8 +22,9 @@ def _mock_urlopen(content: str) -> MagicMock:
 
 class TestQuery:
     def test_returns_response_content(self) -> None:
+        msgs = [{"role": "user", "content": "hi"}]
         with patch("urllib.request.urlopen", return_value=_mock_urlopen("hello")):
-            result = query("http://host:8001", "llama", [{"role": "user", "content": "hi"}])
+            result = query("http://host:8001", "llama", msgs)
         assert result == "hello"
 
     def test_sends_correct_payload(self) -> None:
@@ -62,14 +63,18 @@ class TestQuery:
             hdrs=None,  # type: ignore[arg-type]
             fp=BytesIO(b"oops"),
         )
-        with patch("urllib.request.urlopen", side_effect=err):
-            with pytest.raises(urllib.error.HTTPError):
-                query("http://host:8001", "llama", [])
+        with (
+            patch("urllib.request.urlopen", side_effect=err),
+            pytest.raises(urllib.error.HTTPError),
+        ):
+            query("http://host:8001", "llama", [])
 
     def test_raises_os_error_on_connection_failure(self) -> None:
-        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
-            with pytest.raises(OSError):
-                query("http://host:8001", "llama", [])
+        with (
+            patch("urllib.request.urlopen", side_effect=OSError("refused")),
+            pytest.raises(OSError),
+        ):
+            query("http://host:8001", "llama", [])
 
     def test_respects_max_tokens(self) -> None:
         captured = {}

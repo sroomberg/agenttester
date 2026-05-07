@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import urllib.error
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
-
-import urllib.error
 
 from .config import load_config
 from .orchestrator import Orchestrator
@@ -126,19 +125,23 @@ def query(
     endpoint: Annotated[str, typer.Argument(help="vLLM server endpoint (http://HOST:PORT)")],
     model_id: Annotated[str, typer.Argument(help="Model ID served by the endpoint")],
     prompt: Annotated[str, typer.Argument(help="Prompt to send")],
-    max_tokens: Annotated[int, typer.Option("--max-tokens", help="Maximum tokens to generate")] = 2048,
+    max_tokens: Annotated[
+        int, typer.Option("--max-tokens", help="Maximum tokens to generate")
+    ] = 2048,
 ) -> None:
     """Query a vLLM model server and print the response."""
     try:
-        result = _vllm_query(endpoint, model_id, [{"role": "user", "content": prompt}], max_tokens)
+        result = _vllm_query(
+            endpoint, model_id, [{"role": "user", "content": prompt}], max_tokens
+        )
         console.print(result)
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         console.print(f"[red]HTTP {e.code}: {body}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
     except OSError as e:
         console.print(f"[red]{e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
