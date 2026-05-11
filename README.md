@@ -14,16 +14,16 @@ uv pip install -e ".[dev]"
 
 ```bash
 # List built-in agents
-agenttester agents
+agent-tester agents
 
 # Run two agents on the same prompt
-agenttester run "Add unit tests for the auth module" --agents claude,aider
+agent-tester run "Add unit tests for the auth module" --agents claude,aider
 
 # Use a prompt file
-agenttester run --prompt-file task.md --agents claude,codex,aider
+agent-tester run --prompt-file task.md --agents claude,codex,aider
 
 # Keep worktrees for manual inspection
-agenttester run "Refactor logging" --agents claude,aider --keep-worktrees
+agent-tester run "Refactor logging" --agents claude,aider --keep-worktrees
 ```
 
 ## How It Works
@@ -43,7 +43,15 @@ git diff agenttester/a3f2c1d0/claude agenttester/a3f2c1d0/aider
 
 ## Configuration
 
-Copy `config.example.yaml` to `agenttester.yaml` in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, and `codex`.
+Copy `config.example.yaml` to `agent-tester.yaml` in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, and `codex`.
+
+You can also pass a config file explicitly:
+
+```bash
+agent-tester run "Fix the bug" --agents claude --config /path/to/custom.yaml
+```
+
+A global config at `~/.config/agenttester/config.yaml` or `~/.agenttester/config.yaml` is merged automatically — local project config takes precedence.
 
 ### Command Placeholders
 
@@ -66,8 +74,8 @@ For comparing responses from vLLM model servers interactively, with persistent
 conversation history within a session:
 
 ```bash
-agenttester repl                        # auto-discovers agenttester.yaml
-agenttester repl --config custom.yaml   # explicit config path
+agent-tester repl                        # auto-discovers agent-tester.yaml
+agent-tester repl --config custom.yaml   # explicit config path
 ```
 
 The REPL discovers any agent in your config whose command uses `query_model.py`,
@@ -80,8 +88,8 @@ See `config.example.yaml` for example vLLM agent entries.
 
 ```bash
 uv pip install -e ".[dev]"
-ruff check src/
-ruff format src/
+ruff check src/ tests/
+ruff format src/ tests/
 pytest
 ```
 
@@ -89,10 +97,10 @@ pytest
 
 ```bash
 # Run against the current directory
-docker compose run --rm agenttester run "Fix the bug" --agents claude
+docker compose run --rm agent-tester run "Fix the bug" --agents claude
 
 # Run against a different repo
-REPO_PATH=/path/to/repo docker compose run --rm agenttester run "Add tests" --agents claude,aider
+REPO_PATH=/path/to/repo docker compose run --rm agent-tester run "Add tests" --agents claude,aider
 ```
 
 ## Library Usage

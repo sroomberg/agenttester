@@ -1,5 +1,5 @@
 services:
-  agenttester:
+  agent-tester:
     build: .
     volumes:
       - ${REPO_PATH:-.}:/repo

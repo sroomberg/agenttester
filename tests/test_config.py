@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from agenttester.config import AgentConfig, load_config
 
 
@@ -97,6 +99,24 @@ class TestLoadConfigYaml:
     def test_none_config_returns_presets(self) -> None:
         agents = load_config(None)
         assert len(agents) >= 3
+
+    def test_loads_agent_tester_filename(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "agent-tester.yaml"
+        config_file.write_text('agents:\n  custom:\n    command: "my-agent {prompt}"\n')
+        agents = load_config(config_file)
+        assert "custom" in agents
+
+    def test_auto_discovers_agent_tester_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "agent-tester.yaml").write_text(
+            'agents:\n  discovered:\n    command: "found {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            agents = load_config()
+            assert "discovered" in agents
 
 
 class TestLoadConfigGlobal:

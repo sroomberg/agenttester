@@ -10,10 +10,10 @@ import yaml
 from .presets import PRESETS
 
 CONFIG_CANDIDATES = [
-    "agenttester.yaml",
-    "agenttester.yml",
-    ".agenttester.yaml",
-    ".agenttester.yml",
+    "agent-tester.yaml",
+    "agent-tester.yml",
+    ".agent-tester.yaml",
+    ".agent-tester.yml",
 ]
 
 
