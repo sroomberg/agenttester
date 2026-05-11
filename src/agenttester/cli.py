@@ -17,11 +17,19 @@ from .repl import run_repl
 from .vllm import query as _vllm_query
 
 app = typer.Typer(
-    name="agenttester",
+    name="agent-tester",
     help="Send a prompt to multiple coding agents in parallel and compare results.",
-    no_args_is_help=True,
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
 console = Console()
+
+
+@app.callback()
+def default(ctx: typer.Context) -> None:
+    """Open the interactive REPL when no subcommand is given."""
+    if ctx.invoked_subcommand is None:
+        asyncio.run(run_repl())
 
 
 def _find_git_root(start: Path) -> Path:
