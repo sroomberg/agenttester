@@ -9,7 +9,8 @@ class TestInjectBranchIntoPrompt:
     def test_format(self) -> None:
         prompt = "Fix the bug"
         result = _inject_branch_into_prompt(prompt, "abc123", "claude")
-        assert result.startswith("You are working on branch `agenttester/abc123/claude`.\n\n")
+        expected_prefix = "You are working on branch `agenttester/abc123/claude`.\n\n"
+        assert result.startswith(expected_prefix)
         assert result.endswith(prompt)
 
     def test_includes_run_id_and_agent_name(self) -> None:
