@@ -26,10 +26,16 @@ console = Console()
 
 
 @app.callback()
-def default(ctx: typer.Context) -> None:
+def default(
+    ctx: typer.Context,
+    skip_checks: Annotated[
+        bool,
+        typer.Option("--skip-checks", "-S", help="Skip endpoint connection checks"),
+    ] = False,
+) -> None:
     """Open the interactive REPL when no subcommand is given."""
     if ctx.invoked_subcommand is None:
-        asyncio.run(run_repl())
+        asyncio.run(run_repl(skip_checks=skip_checks))
 
 
 def _find_git_root(start: Path) -> Path:
@@ -177,9 +183,13 @@ def repl(
         Path | None,
         typer.Option("--config", "-c", help="Path to config YAML file"),
     ] = None,
+    skip_checks: Annotated[
+        bool,
+        typer.Option("--skip-checks", "-S", help="Skip endpoint connection checks"),
+    ] = False,
 ) -> None:
     """Start an interactive REPL across all vLLM model agents."""
-    asyncio.run(run_repl(config))
+    asyncio.run(run_repl(config, skip_checks=skip_checks))
 
 
 @app.command("agents")

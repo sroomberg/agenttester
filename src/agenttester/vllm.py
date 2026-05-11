@@ -7,6 +7,20 @@ import urllib.error
 import urllib.request
 
 
+def check_connection(endpoint: str, timeout: int = 5) -> bool:
+    """Return True if the vLLM server at *endpoint* is reachable.
+
+    Uses GET /v1/models — a lightweight, read-only health check that every
+    vLLM server exposes.
+    """
+    try:
+        req = urllib.request.Request(f"{endpoint.rstrip('/')}/v1/models")
+        with urllib.request.urlopen(req, timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 def query(
     endpoint: str,
     model_id: str,

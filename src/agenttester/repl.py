@@ -14,6 +14,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 
 from .config import CONFIG_CANDIDATES
+from .vllm import check_connection
 from .vllm import query as _vllm_query
 
 _COMMAND_PATTERN = re.compile(
@@ -79,7 +80,15 @@ async def _query_all(models: dict[str, Model], prompt: str) -> dict[str, str]:
     }
 
 
-async def run_repl(config_path: Path | None = None) -> None:
+async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
+    """Check all model endpoints in parallel. Returns name → reachable."""
+    results = await asyncio.gather(
+        *[asyncio.to_thread(check_connection, m.endpoint) for m in models.values()]
+    )
+    return dict(zip(models.keys(), results, strict=True))
+
+
+async def run_repl(config_path: Path | None = None, skip_checks: bool = False) -> None:
     console = Console()
     models = load_models(config_path)
     if not models:
@@ -89,9 +98,35 @@ async def run_repl(config_path: Path | None = None) -> None:
         )
         return
 
-    console.print(f"[bold]Models:[/bold] {', '.join(models)}")
+    if skip_checks:
+        model_list = ", ".join(models)
+        console.print(
+            f"[bold]Models:[/bold] {model_list}  [dim](connection checks skipped)[/dim]"
+        )
+    else:
+        with console.status("[dim]Checking connections…[/dim]"):
+            reachable = await _check_connections(models)
+
+        for name, ok in reachable.items():
+            icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
+            console.print(f"  {icon} {name}  [dim]{models[name].endpoint}[/dim]")
+
+        live_models = {name: m for name, m in models.items() if reachable[name]}
+        if not live_models:
+            console.print("\n[red]No reachable models. Check your endpoints.[/red]")
+            return
+
+        if len(live_models) < len(models):
+            dropped = len(models) - len(live_models)
+            console.print(
+                f"\n[yellow]Continuing with {len(live_models)} reachable model(s) "
+                f"({dropped} unreachable skipped).[/yellow]"
+            )
+
+        models = live_models
+
     console.print(
-        "[dim]Commands: /reset (clear history), exit or Ctrl-C to quit[/dim]\n"
+        "\n[dim]Commands: /reset (clear history), exit or Ctrl-C to quit[/dim]\n"
     )
 
     while True:
