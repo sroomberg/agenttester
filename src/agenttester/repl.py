@@ -112,8 +112,11 @@ async def run_repl(config_path: Path | None = None) -> None:
             console.print("[dim]Context cleared.[/dim]\n")
             continue
 
+        n = len(models)
+        label = "model" if n == 1 else "models"
+        with console.status(f"[dim]Querying {n} {label}…[/dim]"):
+            responses = await _query_all(models, prompt)
         console.print()
-        responses = await _query_all(models, prompt)
         for name, reply in responses.items():
             console.print(
                 Panel(reply, title=f"[bold]{name}[/bold]", border_style="blue")
