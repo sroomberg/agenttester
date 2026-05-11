@@ -103,9 +103,7 @@ class TestLoadConfigGlobal:
     def test_global_config_adds_agent(self, tmp_path: Path) -> None:
         global_config = tmp_path / "global_config.yaml"
         global_config.write_text(
-            "agents:\n"
-            "  global-agent:\n"
-            '    command: "global-agent {prompt}"\n'
+            'agents:\n  global-agent:\n    command: "global-agent {prompt}"\n'
         )
         with patch("agenttester.config._get_global_config_candidates") as mock:
             mock.return_value = [global_config]
@@ -129,17 +127,9 @@ class TestLoadConfigGlobal:
 
     def test_local_overrides_global(self, tmp_path: Path) -> None:
         global_config = tmp_path / "global_config.yaml"
-        global_config.write_text(
-            "agents:\n"
-            "  myagent:\n"
-            '    command: "global-cmd"\n'
-        )
+        global_config.write_text('agents:\n  myagent:\n    command: "global-cmd"\n')
         local_config = tmp_path / "local.yaml"
-        local_config.write_text(
-            "agents:\n"
-            "  myagent:\n"
-            '    command: "local-cmd"\n'
-        )
+        local_config.write_text('agents:\n  myagent:\n    command: "local-cmd"\n')
         with patch("agenttester.config._get_global_config_candidates") as mock:
             mock.return_value = [global_config]
             agents = load_config(local_config)
@@ -148,9 +138,7 @@ class TestLoadConfigGlobal:
     def test_local_only_no_global(self, tmp_path: Path) -> None:
         local_config = tmp_path / "local.yaml"
         local_config.write_text(
-            "agents:\n"
-            "  local-only:\n"
-            '    command: "local {prompt}"\n'
+            'agents:\n  local-only:\n    command: "local {prompt}"\n'
         )
         with patch("agenttester.config._get_global_config_candidates") as mock:
             mock.return_value = [tmp_path / "nonexistent.yaml"]
@@ -160,17 +148,9 @@ class TestLoadConfigGlobal:
 
     def test_global_searched_in_priority_order(self, tmp_path: Path) -> None:
         first_config = tmp_path / "first.yaml"
-        first_config.write_text(
-            "agents:\n"
-            "  first-agent:\n"
-            '    command: "first"\n'
-        )
+        first_config.write_text('agents:\n  first-agent:\n    command: "first"\n')
         second_config = tmp_path / "second.yaml"
-        second_config.write_text(
-            "agents:\n"
-            "  second-agent:\n"
-            '    command: "second"\n'
-        )
+        second_config.write_text('agents:\n  second-agent:\n    command: "second"\n')
         with patch("agenttester.config._get_global_config_candidates") as mock:
             mock.return_value = [first_config, second_config]
             agents = load_config()
@@ -179,11 +159,7 @@ class TestLoadConfigGlobal:
 
     def test_backward_compat_explicit_path(self, tmp_path: Path) -> None:
         config_file = tmp_path / "agenttester.yaml"
-        config_file.write_text(
-            "agents:\n"
-            "  custom:\n"
-            '    command: "custom {prompt}"\n'
-        )
+        config_file.write_text('agents:\n  custom:\n    command: "custom {prompt}"\n')
         with patch("agenttester.config._get_global_config_candidates") as mock:
             mock.return_value = [tmp_path / "nonexistent.yaml"]
             agents = load_config(config_file)
