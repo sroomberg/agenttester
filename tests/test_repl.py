@@ -17,13 +17,13 @@ from agenttester.repl import Model, _query_all, _query_sync, load_models
 def _make_config(tmp_path: Path, agents: dict) -> Path:
     import yaml
 
-    p = tmp_path / "agenttester.yaml"
+    p = tmp_path / "agent-tester.yaml"
     p.write_text(yaml.dump({"agents": agents}))
     return p
 
 
 def _vllm_command(endpoint: str, model_id: str) -> str:
-    return f"agenttester query {endpoint} {model_id} {{prompt}}"
+    return f"agent-tester query {endpoint} {model_id} {{prompt}}"
 
 
 # ---------------------------------------------------------------------------

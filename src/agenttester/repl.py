@@ -17,7 +17,7 @@ from .config import CONFIG_CANDIDATES
 from .vllm import query as _vllm_query
 
 _COMMAND_PATTERN = re.compile(
-    r"agenttester\s+query\s+(https?://\S+)\s+(\S+)\s+\{prompt\}"
+    r"agent-?tester\s+query\s+(https?://\S+)\s+(\S+)\s+\{prompt\}"
 )
 
 
@@ -85,7 +85,7 @@ async def run_repl(config_path: Path | None = None) -> None:
     if not models:
         console.print("[red]No vLLM model agents found in config.[/red]")
         console.print(
-            "Add agents using 'agenttester query' commands to your agenttester.yaml."
+            "Add agents using 'agent-tester query' commands to your agent-tester.yaml."
         )
         return
 

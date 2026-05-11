@@ -1,5 +1,5 @@
 # AgentTester configuration
-# Copy to agenttester.yaml in your target repo.
+# Copy to agent-tester.yaml in your target repo.
 # Entries here override built-in presets (claude, aider, codex).
 #
 # host: "localhost" (default) runs locally; set to "user@server" for SSH.
@@ -14,7 +14,7 @@ agents:
   aider:
     command: "aider --yes-always --no-auto-commits --message {prompt}"
     host: localhost
-    commit_style: manual  # agenttester commits changes after the agent exits
+    commit_style: manual  # agent-tester commits changes after the agent exits
     timeout: 600
 
   codex:
@@ -27,7 +27,7 @@ agents:
   # remote-claude:
   #   command: 'claude -p {prompt} --allowedTools "Bash,Read,Edit"'
   #   host: user@gpu-server
-  #   remote_workdir: /home/user/agenttester
+  #   remote_workdir: /home/user/agent-tester
   #   commit_style: auto
   #   timeout: 900
 
@@ -50,19 +50,19 @@ agents:
   # Then replace HOST_IP with the public IP printed by that script.
 
   # llama3:
-  #   command: 'agenttester query http://HOST_IP:8001 meta-llama/Meta-Llama-3-8B-Instruct {prompt}'
+  #   command: 'agent-tester query http://HOST_IP:8001 meta-llama/Meta-Llama-3-8B-Instruct {prompt}'
   #   host: localhost
   #   commit_style: manual
   #   timeout: 120
 
   # mistral:
-  #   command: 'agenttester query http://HOST_IP:8002 mistralai/Mistral-7B-Instruct-v0.2 {prompt}'
+  #   command: 'agent-tester query http://HOST_IP:8002 mistralai/Mistral-7B-Instruct-v0.2 {prompt}'
   #   host: localhost
   #   commit_style: manual
   #   timeout: 120
 
   # qwen:
-  #   command: 'agenttester query http://HOST_IP:8003 Qwen/Qwen2.5-7B-Instruct {prompt}'
+  #   command: 'agent-tester query http://HOST_IP:8003 Qwen/Qwen2.5-7B-Instruct {prompt}'
   #   host: localhost
   #   commit_style: manual
   #   timeout: 120
