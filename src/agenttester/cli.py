@@ -24,6 +24,22 @@ app = typer.Typer(
 console = Console()
 
 
+def _find_git_root(start: Path) -> Path:
+    """Walk up from *start* to find the directory containing a .git entry.
+
+    Returns the first parent directory that contains a `.git` file or directory.
+    Falls back to *start* itself if none is found.
+    """
+    current = start.resolve()
+    while True:
+        if (current / ".git").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            return start.resolve()
+        current = parent
+
+
 def _parse_agent_names(raw: list[str]) -> list[str]:
     """Flatten comma-separated and repeated --agents values."""
     names: list[str] = []
@@ -109,7 +125,7 @@ def run(
         selected.append(agent_cfg)
 
     # Run
-    repo_path = (repo or Path.cwd()).resolve()
+    repo_path = _find_git_root(repo or Path.cwd())
     orchestrator = Orchestrator(repo_path, console)
 
     try:

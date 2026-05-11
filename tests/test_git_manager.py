@@ -146,3 +146,45 @@ class TestApplyEnv:
             GitManager._apply_env(repo)
         called_env = repo.git.update_environment.call_args[1]
         assert called_env["GIT_SSH_COMMAND"] == existing
+
+
+class TestPullFromRemote:
+    def test_returns_false_when_no_remotes(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        result = gm.pull_from_remote()
+        assert result is False
+
+    def test_returns_false_when_origin_unreachable(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        gm.repo.create_remote("origin", "git@invalid.nonexistent:foo/bar.git")
+        result = gm.pull_from_remote()
+        assert result is False
+
+    def test_returns_true_on_successful_pull(self) -> None:
+        # Mock the entire repo with a successful pull
+        mock_repo = MagicMock(spec=git.Repo)
+        mock_remote = MagicMock()
+        mock_remote.name = "origin"
+        mock_remote.pull = MagicMock(return_value=None)
+
+        # Set up remotes as a mock object that supports iteration and has .origin
+        mock_remotes = MagicMock()
+        mock_remotes.__iter__ = MagicMock(return_value=iter([mock_remote]))
+        mock_remotes.__bool__ = MagicMock(return_value=True)
+        mock_remotes.origin = mock_remote
+
+        mock_repo.remotes = mock_remotes
+
+        gm = GitManager.__new__(GitManager)
+        gm.repo = mock_repo
+        result = gm.pull_from_remote()
+        assert result is True
+        mock_remote.pull.assert_called_once()
+
+    def test_does_not_raise_on_exception(self) -> None:
+        # Test that the method doesn't raise when accessing remotes raises
+        gm = GitManager.__new__(GitManager)
+        gm.repo = MagicMock()
+        type(gm.repo).remotes = MagicMock(side_effect=Exception("test error"))
+        result = gm.pull_from_remote()
+        assert result is False

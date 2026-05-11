@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from agenttester.config import AgentConfig, load_config
 
@@ -96,3 +97,95 @@ class TestLoadConfigYaml:
     def test_none_config_returns_presets(self) -> None:
         agents = load_config(None)
         assert len(agents) >= 3
+
+
+class TestLoadConfigGlobal:
+    def test_global_config_adds_agent(self, tmp_path: Path) -> None:
+        global_config = tmp_path / "global_config.yaml"
+        global_config.write_text(
+            "agents:\n"
+            "  global-agent:\n"
+            '    command: "global-agent {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [global_config]
+            agents = load_config()
+            assert "global-agent" in agents
+            assert agents["global-agent"].command == "global-agent {prompt}"
+
+    def test_global_config_overrides_preset(self, tmp_path: Path) -> None:
+        global_config = tmp_path / "global_config.yaml"
+        global_config.write_text(
+            "agents:\n"
+            "  claude:\n"
+            '    command: "claude-custom {prompt}"\n'
+            "    timeout: 1200\n"
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [global_config]
+            agents = load_config()
+            assert agents["claude"].command == "claude-custom {prompt}"
+            assert agents["claude"].timeout == 1200
+
+    def test_local_overrides_global(self, tmp_path: Path) -> None:
+        global_config = tmp_path / "global_config.yaml"
+        global_config.write_text(
+            "agents:\n"
+            "  myagent:\n"
+            '    command: "global-cmd"\n'
+        )
+        local_config = tmp_path / "local.yaml"
+        local_config.write_text(
+            "agents:\n"
+            "  myagent:\n"
+            '    command: "local-cmd"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [global_config]
+            agents = load_config(local_config)
+            assert agents["myagent"].command == "local-cmd"
+
+    def test_local_only_no_global(self, tmp_path: Path) -> None:
+        local_config = tmp_path / "local.yaml"
+        local_config.write_text(
+            "agents:\n"
+            "  local-only:\n"
+            '    command: "local {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [tmp_path / "nonexistent.yaml"]
+            agents = load_config(local_config)
+            assert "local-only" in agents
+            assert "claude" in agents  # presets still present
+
+    def test_global_searched_in_priority_order(self, tmp_path: Path) -> None:
+        first_config = tmp_path / "first.yaml"
+        first_config.write_text(
+            "agents:\n"
+            "  first-agent:\n"
+            '    command: "first"\n'
+        )
+        second_config = tmp_path / "second.yaml"
+        second_config.write_text(
+            "agents:\n"
+            "  second-agent:\n"
+            '    command: "second"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [first_config, second_config]
+            agents = load_config()
+            assert "first-agent" in agents
+            assert "second-agent" not in agents
+
+    def test_backward_compat_explicit_path(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "agenttester.yaml"
+        config_file.write_text(
+            "agents:\n"
+            "  custom:\n"
+            '    command: "custom {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [tmp_path / "nonexistent.yaml"]
+            agents = load_config(config_file)
+            assert "custom" in agents
+            assert "claude" in agents

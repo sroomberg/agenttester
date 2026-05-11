@@ -55,6 +55,23 @@ class GitManager:
         """Return the current HEAD commit SHA."""
         return self.repo.head.commit.hexsha
 
+    def pull_from_remote(self) -> bool:
+        """Pull latest changes from origin.
+
+        Returns True if the pull succeeded, False if there is no remote or
+        the remote is unreachable. Never raises.
+        """
+        try:
+            if not self.repo.remotes:
+                return False
+            remote_names = [r.name for r in self.repo.remotes]
+            if "origin" not in remote_names:
+                return False
+            self.repo.remotes.origin.pull()
+            return True
+        except Exception:
+            return False
+
     def create_worktree(self, agent_name: str, run_id: str) -> Path:
         """Create a worktree with a new branch for an agent run."""
         branch = f"agenttester/{run_id}/{agent_name}"

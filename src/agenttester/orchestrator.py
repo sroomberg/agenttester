@@ -18,6 +18,12 @@ AGENT_COLORS = ["cyan", "green", "yellow", "magenta", "blue"]
 MAX_CONCURRENT = 5
 
 
+def _inject_branch_into_prompt(prompt: str, run_id: str, agent_name: str) -> str:
+    """Prepend the working branch name to the prompt."""
+    branch = f"agenttester/{run_id}/{agent_name}"
+    return f"You are working on branch `{branch}`.\n\n{prompt}"
+
+
 class Orchestrator:
     """Run multiple agents in parallel, each in its own worktree."""
 
@@ -42,6 +48,13 @@ class Orchestrator:
                 "Create an initial commit before running agents."
             )
             raise RuntimeError(msg)
+
+        if not self.git.pull_from_remote():
+            self.console.print(
+                "[yellow]Warning: could not pull from remote "
+                "(no remote configured or remote unreachable). "
+                "Continuing with local state.[/yellow]"
+            )
 
         if len(agents) > MAX_CONCURRENT:
             msg = f"Maximum {MAX_CONCURRENT} agents allowed, got {len(agents)}"
@@ -79,8 +92,9 @@ class Orchestrator:
                     agent.name, -1, 0.0, "", "", "Worktree creation failed"
                 )
             async with self.semaphore:
+                agent_prompt = _inject_branch_into_prompt(prompt, run_id, agent.name)
                 result = await run_agent(
-                    agent, wt, prompt, self.console, color, output_lock
+                    agent, wt, agent_prompt, self.console, color, output_lock
                 )
             # Auto-commit for agents that don't commit themselves
             if agent.commit_style == "manual" and result.exit_code == 0:
