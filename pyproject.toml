@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenttester"
-version = "0.1.1"
+version = "0.2.0"
 description = "Send prompts to multiple coding agents in parallel and compare results"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 agenttester = "agenttester.cli:app"
+at = "agenttester.cli:app"
 
 [tool.ruff]
 target-version = "py310"

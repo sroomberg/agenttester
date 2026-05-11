@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 
 from .config import load_config
+from .cost import CostTracker
 from .orchestrator import Orchestrator
 from .repl import run_repl
 from .vllm import query as _vllm_query
@@ -175,3 +176,59 @@ def list_agents(
         console.print(f"    host:    {agent.host}")
         console.print(f"    commit:  {agent.commit_style}  timeout: {agent.timeout}s")
         console.print()
+
+
+@app.command()
+def costs(
+    run_id: Annotated[
+        str | None, typer.Argument(help="Filter by run ID (optional)")
+    ] = None,
+    agent: Annotated[
+        str | None, typer.Option("--agent", "-a", help="Filter by agent name")
+    ] = None,
+) -> None:
+    """View cost tracking data."""
+    tracker = CostTracker()
+
+    if run_id:
+        stats = tracker.get_run_stats(run_id)
+        if not stats:
+            console.print(f"[yellow]No data found for run {run_id}[/yellow]")
+            return
+
+        console.print(f"[bold]Run {run_id}:[/bold]\n")
+        console.print(f"  Agents:     {stats['agents']}")
+        console.print(f"  Successful: {stats['successful']}")
+        console.print(f"  Failed:     {stats['failed']}")
+        console.print(f"  Total time: {stats['total_duration']:.2f}s")
+        console.print(f"  Avg time:   {stats['avg_duration']:.2f}s")
+    else:
+        entries = tracker.read_all()
+
+        if agent:
+            entries = [e for e in entries if e.agent_name == agent]
+
+        if not entries:
+            console.print("[yellow]No cost data found[/yellow]")
+            return
+
+        console.print("[bold]Cost entries:[/bold]\n")
+        from rich.table import Table
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Run ID")
+        table.add_column("Agent")
+        table.add_column("Duration")
+        table.add_column("Exit Code")
+        table.add_column("Timestamp")
+
+        for entry in sorted(entries, key=lambda e: e.timestamp, reverse=True)[:20]:
+            table.add_row(
+                entry.run_id[:8],
+                entry.agent_name,
+                f"{entry.duration:.2f}s",
+                "✅" if entry.exit_code == 0 else "❌",
+                entry.timestamp,
+            )
+
+        console.print(table)

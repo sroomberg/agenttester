@@ -10,6 +10,7 @@ from rich.console import Console
 
 from .agent_runner import AgentResult, run_agent
 from .config import AgentConfig
+from .cost import CostTracker
 from .git_manager import GitManager
 from .report import generate_report
 
@@ -25,6 +26,7 @@ class Orchestrator:
         self.git = GitManager(repo_path)
         self.console = console
         self.semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        self.cost_tracker = CostTracker()
 
     async def run(
         self,
@@ -124,6 +126,9 @@ class Orchestrator:
         report_path = self.repo_path / f"agenttester-report-{run_id}.md"
         report_path.write_text(report)
         self.console.print(f"\n[bold]Report:[/bold] {report_path}")
+
+        # Record costs
+        self.cost_tracker.record_run(run_id, results, {"prompt_length": len(prompt)})
 
         # Cleanup
         if keep_worktrees:
