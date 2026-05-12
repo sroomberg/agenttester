@@ -37,6 +37,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create GitHub release
-        run: gh release create "${{ github.ref_name }}" --generate-notes --title "${{ github.ref_name }}"
+        run: |
+          VERSION="${{ github.ref_name }}"
+          awk "p && /^## v/{exit} /^## ${VERSION}/{p=1}" CHANGES.md > /tmp/release-notes.md
+          gh release create "$VERSION" --title "$VERSION" --notes-file /tmp/release-notes.md
         env:
           GH_TOKEN: ${{ github.token }}
