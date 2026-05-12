@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agenttester.config import AgentConfig, load_config
+from agenttester.config import GLOBAL_CONFIG_DIR, AgentConfig, get_reports_dir, load_config
 
 
 class TestLoadConfigPresets:
@@ -118,6 +118,42 @@ class TestLoadConfigYaml:
             agents = load_config()
             assert "discovered" in agents
 
+    def test_auto_discovers_agent_tester_yml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "agent-tester.yml").write_text(
+            'agents:\n  discovered:\n    command: "found {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            agents = load_config()
+            assert "discovered" in agents
+
+    def test_auto_discovers_dotfile_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".agent-tester.yaml").write_text(
+            'agents:\n  discovered:\n    command: "found {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            agents = load_config()
+            assert "discovered" in agents
+
+    def test_auto_discovers_dotfile_yml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".agent-tester.yml").write_text(
+            'agents:\n  discovered:\n    command: "found {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            agents = load_config()
+            assert "discovered" in agents
+
 
 class TestLoadConfigGlobal:
     def test_global_config_adds_agent(self, tmp_path: Path) -> None:
@@ -166,6 +202,16 @@ class TestLoadConfigGlobal:
             assert "local-only" in agents
             assert "claude" in agents  # presets still present
 
+    def test_global_config_yaml_extension(self, tmp_path: Path) -> None:
+        global_config = tmp_path / "config.yaml"
+        global_config.write_text(
+            'agents:\n  global-agent:\n    command: "global-agent {prompt}"\n'
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [tmp_path / "config.yml", global_config]
+            agents = load_config()
+            assert "global-agent" in agents
+
     def test_global_searched_in_priority_order(self, tmp_path: Path) -> None:
         first_config = tmp_path / "first.yaml"
         first_config.write_text('agents:\n  first-agent:\n    command: "first"\n')
@@ -185,3 +231,135 @@ class TestLoadConfigGlobal:
             agents = load_config(config_file)
             assert "custom" in agents
             assert "claude" in agents
+
+
+class TestInvalidYaml:
+    def test_invalid_yaml_explicit_path_raises(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "bad.yaml"
+        config_file.write_text("agents:\n  bad: [unclosed\n")
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            load_config(config_file)
+
+    def test_invalid_yaml_explicit_path_no_extension_raises(
+        self, tmp_path: Path
+    ) -> None:
+        config_file = tmp_path / "myconfig"
+        config_file.write_text("agents:\n  bad: [unclosed\n")
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            load_config(config_file)
+
+    def test_invalid_yaml_global_config_raises(self, tmp_path: Path) -> None:
+        global_config = tmp_path / "config.yml"
+        global_config.write_text("agents:\n  bad: [unclosed\n")
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [global_config]
+            with pytest.raises(ValueError, match="Invalid YAML"):
+                load_config()
+
+    def test_invalid_yaml_auto_detected_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "agent-tester.yaml").write_text("agents:\n  bad: [unclosed\n")
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            with pytest.raises(ValueError, match="Invalid YAML"):
+                load_config()
+
+    def test_explicit_path_no_extension_loads_valid_yaml(
+        self, tmp_path: Path
+    ) -> None:
+        config_file = tmp_path / "myconfig"
+        config_file.write_text('agents:\n  custom:\n    command: "agent {prompt}"\n')
+        agents = load_config(config_file)
+        assert "custom" in agents
+
+
+class TestGetReportsDir:
+    def test_default_is_global_config_dir(self, tmp_path: Path) -> None:
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            result = get_reports_dir(repo)
+        assert result == GLOBAL_CONFIG_DIR / "projects" / "myrepo"
+
+    def test_local_config_reports_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        custom = tmp_path / "out"
+        (tmp_path / "agent-tester.yaml").write_text(f"reports_dir: {custom}\n")
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            result = get_reports_dir(repo)
+        assert result == custom
+
+    def test_explicit_config_reports_dir(self, tmp_path: Path) -> None:
+        custom = tmp_path / "reports"
+        config_file = tmp_path / "myconfig.yaml"
+        config_file.write_text(f"reports_dir: {custom}\n")
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        result = get_reports_dir(repo, config_file)
+        assert result == custom
+
+    def test_local_config_tilde_expansion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "agent-tester.yaml").write_text("reports_dir: ~/reports\n")
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = []
+            result = get_reports_dir(repo)
+        assert result == Path("~/reports").expanduser()
+
+    def test_global_config_project_reports_dir(self, tmp_path: Path) -> None:
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        custom = tmp_path / "global-reports"
+        global_config = tmp_path / "config.yml"
+        global_config.write_text(
+            f"projects:\n  myrepo:\n    reports_dir: {custom}\n"
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [global_config]
+            result = get_reports_dir(repo)
+        assert result == custom
+
+    def test_global_config_wrong_project_uses_default(self, tmp_path: Path) -> None:
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        custom = tmp_path / "global-reports"
+        global_config = tmp_path / "config.yml"
+        global_config.write_text(
+            f"projects:\n  otherrepo:\n    reports_dir: {custom}\n"
+        )
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [global_config]
+            result = get_reports_dir(repo)
+        assert result == GLOBAL_CONFIG_DIR / "projects" / "myrepo"
+
+    def test_local_config_overrides_global_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        local_reports = tmp_path / "local-reports"
+        global_reports = tmp_path / "global-reports"
+        (tmp_path / "agent-tester.yaml").write_text(
+            f"reports_dir: {local_reports}\n"
+        )
+        global_config = tmp_path / "config.yml"
+        global_config.write_text(
+            f"projects:\n  myrepo:\n    reports_dir: {global_reports}\n"
+        )
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        with patch("agenttester.config._get_global_config_candidates") as mock:
+            mock.return_value = [global_config]
+            result = get_reports_dir(repo)
+        assert result == local_reports

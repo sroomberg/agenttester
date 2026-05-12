@@ -33,8 +33,9 @@ def _build_prompt(prompt: str, run_id: str, agent_name: str, skills: str) -> str
 class Orchestrator:
     """Run multiple agents in parallel, each in its own worktree."""
 
-    def __init__(self, repo_path: Path, console: Console) -> None:
+    def __init__(self, repo_path: Path, console: Console, reports_dir: Path) -> None:
         self.repo_path = repo_path
+        self.reports_dir = reports_dir
         self.git = GitManager(repo_path)
         self.console = console
         self.semaphore = asyncio.Semaphore(MAX_CONCURRENT)
@@ -144,7 +145,8 @@ class Orchestrator:
 
         # Generate report
         report = generate_report(run_id, base_ref, prompt, results, self.git)
-        report_path = self.repo_path / f"agenttester-report-{run_id}.md"
+        self.reports_dir.mkdir(parents=True, exist_ok=True)
+        report_path = self.reports_dir / f"agenttester-report-{run_id}.md"
         report_path.write_text(report)
         self.console.print(f"\n[bold]Report:[/bold] {report_path}")
 

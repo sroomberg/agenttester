@@ -43,15 +43,44 @@ git diff agenttester/a3f2c1d0/claude agenttester/a3f2c1d0/aider
 
 ## Configuration
 
-Copy `config.example.yaml` to `agent-tester.yaml` in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, and `codex`.
+Copy `config.example.yaml` to `agent-tester.yaml` (or `agent-tester.yml`) in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, and `codex`.
 
-You can also pass a config file explicitly:
+### Config file discovery
 
-```bash
-agent-tester run "Fix the bug" --agents claude --config /path/to/custom.yaml
+Auto-detected local config files must use a `.yml` or `.yaml` extension. The following names are checked in order:
+
+```
+agent-tester.yaml
+agent-tester.yml
+.agent-tester.yaml
+.agent-tester.yml
 ```
 
-A global config at `~/.config/agenttester/config.yaml` or `~/.agenttester/config.yaml` is merged automatically — local project config takes precedence.
+You can also pass a config file explicitly — no extension required:
+
+```bash
+agent-tester run "Fix the bug" --agents claude --config /path/to/myconfig
+```
+
+A global config at `~/.config/agenttester/config.yml` or `~/.config/agenttester/config.yaml` is merged automatically. Local project config takes precedence over global, which takes precedence over built-in presets.
+
+### Reports
+
+Reports are written to `~/.config/agenttester/projects/<repo-name>/` by default. You can override this per-project:
+
+**Local config** (`agent-tester.yaml` in your repo):
+```yaml
+reports_dir: ~/my-reports/myproject
+```
+
+**Global config** (`~/.config/agenttester/config.yml`), per named project:
+```yaml
+projects:
+  myproject:
+    reports_dir: ~/my-reports/myproject
+```
+
+Local config takes priority over the global `projects:` setting.
 
 ### Command Placeholders
 
@@ -110,11 +139,13 @@ import asyncio
 from pathlib import Path
 from rich.console import Console
 from agenttester import Orchestrator, load_config
+from agenttester.config import get_reports_dir
 
 async def main():
+    repo = Path(".").resolve()
     agents = load_config()
     selected = [agents["claude"], agents["aider"]]
-    orch = Orchestrator(Path(".").resolve(), Console())
+    orch = Orchestrator(repo, Console(), get_reports_dir(repo))
     results = await orch.run("Add unit tests", selected)
     for r in results:
         print(f"{r.agent_name}: exit={r.exit_code} duration={r.duration:.1f}s")

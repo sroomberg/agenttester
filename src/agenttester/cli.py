@@ -10,7 +10,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from .config import load_config
+from .config import get_reports_dir, load_config
 from .cost import CostTracker
 from .orchestrator import Orchestrator
 from .repl import run_repl
@@ -140,7 +140,8 @@ def run(
 
     # Run
     repo_path = _find_git_root(repo or Path.cwd())
-    orchestrator = Orchestrator(repo_path, console)
+    reports_dir = get_reports_dir(repo_path, config)
+    orchestrator = Orchestrator(repo_path, console, reports_dir)
 
     try:
         asyncio.run(

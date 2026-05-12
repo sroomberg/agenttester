@@ -17,17 +17,25 @@ CONFIG_CANDIDATES = [
 ]
 
 
-GLOBAL_CONFIG_PATH = Path.home() / ".config" / "agenttester" / "config.yml"
+GLOBAL_CONFIG_DIR = Path.home() / ".config" / "agenttester"
+GLOBAL_CONFIG_PATH = GLOBAL_CONFIG_DIR / "config.yml"
 
 
 def _get_global_config_candidates() -> list[Path]:
-    return [GLOBAL_CONFIG_PATH]
+    return [GLOBAL_CONFIG_DIR / "config.yml", GLOBAL_CONFIG_DIR / "config.yaml"]
+
+
+def _load_yaml(config_path: Path) -> dict:
+    with open(config_path) as f:
+        try:
+            return yaml.safe_load(f) or {}
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML in config file {config_path}: {e}") from e
 
 
 def _load_agents_from_file(config_path: Path) -> dict[str, AgentConfig]:
     """Parse a YAML file and return a dict of AgentConfig objects."""
-    with open(config_path) as f:
-        data = yaml.safe_load(f) or {}
+    data = _load_yaml(config_path)
     result: dict[str, AgentConfig] = {}
     for name, agent_data in (data.get("agents") or {}).items():
         result[name] = AgentConfig(
@@ -40,6 +48,47 @@ def _load_agents_from_file(config_path: Path) -> dict[str, AgentConfig]:
             timeout=agent_data.get("timeout", 600),
         )
     return result
+
+
+def _find_local_config(config_path: Path | None) -> Path | None:
+    """Resolve the local config path, auto-detecting if not provided."""
+    if config_path is not None:
+        return config_path if config_path.exists() else None
+    for candidate in CONFIG_CANDIDATES:
+        p = Path(candidate)
+        if p.exists():
+            return p
+    return None
+
+
+def get_reports_dir(repo_path: Path, config_path: Path | None = None) -> Path:
+    """Return the directory where reports for this project should be stored.
+
+    Priority:
+    1. ``reports_dir`` in the local config (project auto-detected from context)
+    2. ``projects.<repo-name>.reports_dir`` in the global config
+    3. Default: ``~/.config/agenttester/projects/<repo-name>``
+    """
+    project_name = repo_path.name
+
+    # 1. Local config
+    local = _find_local_config(config_path)
+    if local is not None:
+        raw = _load_yaml(local)
+        if "reports_dir" in raw:
+            return Path(raw["reports_dir"]).expanduser()
+
+    # 2. Global config projects section
+    for global_path in _get_global_config_candidates():
+        if global_path.exists():
+            raw = _load_yaml(global_path)
+            project_cfg = (raw.get("projects") or {}).get(project_name) or {}
+            if "reports_dir" in project_cfg:
+                return Path(project_cfg["reports_dir"]).expanduser()
+            break
+
+    # 3. Default
+    return GLOBAL_CONFIG_DIR / "projects" / project_name
 
 
 @dataclass
@@ -77,14 +126,8 @@ def load_config(config_path: Path | None = None) -> dict[str, AgentConfig]:
             break
 
     # Level 3: local project config (highest priority)
-    if config_path is None:
-        for candidate in CONFIG_CANDIDATES:
-            p = Path(candidate)
-            if p.exists():
-                config_path = p
-                break
-
-    if config_path and config_path.exists():
-        agents.update(_load_agents_from_file(config_path))
+    local = _find_local_config(config_path)
+    if local is not None:
+        agents.update(_load_agents_from_file(local))
 
     return agents
