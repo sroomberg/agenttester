@@ -17,15 +17,11 @@ CONFIG_CANDIDATES = [
 ]
 
 
+GLOBAL_CONFIG_PATH = Path.home() / ".config" / "agenttester" / "config.yml"
+
+
 def _get_global_config_candidates() -> list[Path]:
-    """Return the ordered list of global config paths to search."""
-    home = Path.home()
-    return [
-        home / ".config" / "agenttester" / "config.yaml",
-        home / ".config" / "agenttester" / "config.yml",
-        home / ".agenttester" / "config.yaml",
-        home / ".agenttester" / "config.yml",
-    ]
+    return [GLOBAL_CONFIG_PATH]
 
 
 def _load_agents_from_file(config_path: Path) -> dict[str, AgentConfig]:
