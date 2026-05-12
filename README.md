@@ -30,7 +30,7 @@ agent-tester run "Refactor logging" --agents claude,aider --keep-worktrees
 
 1. You provide a prompt and select agents
 2. AgentTester creates a git worktree + branch for each agent from the current HEAD
-3. All agents run concurrently (up to 5), each in its own worktree
+3. All agents run concurrently, each in its own worktree
 4. Agent output streams to the terminal with colored prefixes
 5. A markdown comparison report is generated with diff stats and timing
 6. Worktrees are cleaned up (branches are preserved for `git diff`)
@@ -96,6 +96,33 @@ Local config takes priority over the global `projects:` setting.
 | `commit_style` | `auto` (agent commits) or `manual` (agenttester commits) | `auto` |
 | `timeout` | Max seconds before the agent is killed | `600` |
 | `env` | Extra environment variables (key-value map) | `{}` |
+
+## Skills
+
+Skills are markdown instruction files prepended to every agent prompt. They tell agents what they are allowed to do and how to behave. AgentTester ships with four built-in skills:
+
+| Skill | Description |
+|-------|-------------|
+| `editing.md` | Permission to read and edit files freely; look for reusable code before writing new code; prioritise readability |
+| `testing.md` | Run the test suite and linter after making changes; don't mark a task complete until tests pass |
+| `git.md` | Permitted git operations (branch, commit, push, pull, rebase); never push to the default branch |
+| `bash.md` | Permitted bash operations scoped to code editing and testing; no system-level changes outside the worktree |
+
+### Overriding or extending skills
+
+You can override any built-in skill or add new ones at two levels:
+
+**Global** (`~/.config/agenttester/skills/`): applies to all projects.
+
+**Local** (`.agent-tester/skills/` inside your repo): applies to this project only.
+
+A skill file with the same name as a built-in replaces it entirely. New filenames add additional instructions. Skills are always output in priority order — built-ins first, global skills second, local skills last — so user-defined instructions appear closest to the prompt and carry the most weight with the model.
+
+```
+~/.config/agenttester/skills/testing.md   # overrides built-in testing skill globally
+your-repo/.agent-tester/skills/testing.md # overrides for this project only
+your-repo/.agent-tester/skills/style.md   # adds a new skill for this project
+```
 
 ## Interactive Model REPL
 
