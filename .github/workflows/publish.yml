@@ -39,7 +39,7 @@ jobs:
       - name: Create GitHub release
         run: |
           VERSION="${{ github.ref_name }}"
-          awk "p && /^## v/{exit} /^## ${VERSION}/{p=1}" CHANGES.md > /tmp/release-notes.md
+          awk "p && /^## v/{exit} /^## ${VERSION}/{p=1}" CHANGES > /tmp/release-notes.md
           gh release create "$VERSION" --title "$VERSION" --notes-file /tmp/release-notes.md
         env:
           GH_TOKEN: ${{ github.token }}
