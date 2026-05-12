@@ -119,9 +119,6 @@ def run(
         raise typer.Exit(1)
 
     agent_names = _parse_agent_names(agents)
-    if len(agent_names) > 5:
-        console.print("[red]Maximum 5 agents allowed[/red]")
-        raise typer.Exit(1)
 
     # Load config and resolve agent objects
     all_agents = load_config(config)

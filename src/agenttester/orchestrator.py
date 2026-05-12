@@ -16,7 +16,6 @@ from .report import generate_report
 from .skills import load_skills
 
 AGENT_COLORS = ["cyan", "green", "yellow", "magenta", "blue"]
-MAX_CONCURRENT = 5
 
 
 def _build_prompt(prompt: str, run_id: str, agent_name: str, skills: str) -> str:
@@ -38,7 +37,6 @@ class Orchestrator:
         self.reports_dir = reports_dir
         self.git = GitManager(repo_path)
         self.console = console
-        self.semaphore = asyncio.Semaphore(MAX_CONCURRENT)
         self.cost_tracker = CostTracker()
         self.skills = load_skills(repo_path)
 
@@ -63,10 +61,6 @@ class Orchestrator:
                 "(no remote configured or remote unreachable). "
                 "Continuing with local state.[/yellow]"
             )
-
-        if len(agents) > MAX_CONCURRENT:
-            msg = f"Maximum {MAX_CONCURRENT} agents allowed, got {len(agents)}"
-            raise RuntimeError(msg)
 
         run_id = uuid.uuid4().hex[:8]
         base_ref = self.git.get_head_ref()
@@ -99,11 +93,10 @@ class Orchestrator:
                 return AgentResult(
                     agent.name, -1, 0.0, "", "", "Worktree creation failed"
                 )
-            async with self.semaphore:
-                agent_prompt = _build_prompt(prompt, run_id, agent.name, self.skills)
-                result = await run_agent(
-                    agent, wt, agent_prompt, self.console, color, output_lock
-                )
+            agent_prompt = _build_prompt(prompt, run_id, agent.name, self.skills)
+            result = await run_agent(
+                agent, wt, agent_prompt, self.console, color, output_lock
+            )
             # Auto-commit for agents that don't commit themselves
             if agent.commit_style == "manual" and result.exit_code == 0:
                 try:
