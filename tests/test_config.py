@@ -7,7 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
-from agenttester.config import GLOBAL_CONFIG_DIR, AgentConfig, get_reports_dir, load_config
+from agenttester.config import (
+    GLOBAL_CONFIG_DIR,
+    AgentConfig,
+    get_reports_dir,
+    load_config,
+)
 
 
 class TestLoadConfigPresets:
@@ -266,9 +271,7 @@ class TestInvalidYaml:
             with pytest.raises(ValueError, match="Invalid YAML"):
                 load_config()
 
-    def test_explicit_path_no_extension_loads_valid_yaml(
-        self, tmp_path: Path
-    ) -> None:
+    def test_explicit_path_no_extension_loads_valid_yaml(self, tmp_path: Path) -> None:
         config_file = tmp_path / "myconfig"
         config_file.write_text('agents:\n  custom:\n    command: "agent {prompt}"\n')
         agents = load_config(config_file)
@@ -323,9 +326,7 @@ class TestGetReportsDir:
         repo.mkdir()
         custom = tmp_path / "global-reports"
         global_config = tmp_path / "config.yml"
-        global_config.write_text(
-            f"projects:\n  myrepo:\n    reports_dir: {custom}\n"
-        )
+        global_config.write_text(f"projects:\n  myrepo:\n    reports_dir: {custom}\n")
         with patch("agenttester.config._get_global_config_candidates") as mock:
             mock.return_value = [global_config]
             result = get_reports_dir(repo)
@@ -350,9 +351,7 @@ class TestGetReportsDir:
         monkeypatch.chdir(tmp_path)
         local_reports = tmp_path / "local-reports"
         global_reports = tmp_path / "global-reports"
-        (tmp_path / "agent-tester.yaml").write_text(
-            f"reports_dir: {local_reports}\n"
-        )
+        (tmp_path / "agent-tester.yaml").write_text(f"reports_dir: {local_reports}\n")
         global_config = tmp_path / "config.yml"
         global_config.write_text(
             f"projects:\n  myrepo:\n    reports_dir: {global_reports}\n"

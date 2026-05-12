@@ -133,7 +133,7 @@ pulumi.export(
     pulumi.Output.all(*[inst.public_ip for inst in instances]).apply(
         lambda ips: "\n".join(
             f"  remote-agent-{i}:\n"
-            f'    command: \'claude -p {{prompt}} --allowedTools "Bash,Read,Edit"\'\n'
+            f"    command: 'claude -p {{prompt}} --allowedTools \"Bash,Read,Edit\"'\n"
             f"    host: ubuntu@{ip}\n"
             f"    remote_workdir: /tmp/agenttester\n"
             f"    commit_style: auto\n"
