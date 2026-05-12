@@ -5,7 +5,8 @@ on:
     tags:
       - "v*"
 
-permissions: {}
+permissions:
+  id-token: write
 
 jobs:
   test:
@@ -15,8 +16,6 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     environment: pypi
-    permissions:
-      id-token: write  # trusted publishing (no API token needed)
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
