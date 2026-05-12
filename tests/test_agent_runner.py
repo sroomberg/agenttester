@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -195,6 +196,61 @@ class TestRunAgentLocal:
         stdin.write.assert_called_once_with(b"prompt data")
 
     @pytest.mark.asyncio
+    async def test_input_queue_forwards_messages_to_stdin(
+        self, tmp_path: Path, console: Console, lock: asyncio.Lock
+    ) -> None:
+        agent = AgentConfig(name="test", command="my-agent", timeout=10)
+        proc = _make_mock_proc(returncode=0)
+        stdin = AsyncMock()
+        written: list[bytes] = []
+        stdin.write = MagicMock(side_effect=written.append)
+        stdin.drain = AsyncMock()
+        stdin.close = MagicMock()
+        proc.stdin = stdin
+
+        queue: asyncio.Queue = asyncio.Queue()
+        await queue.put("follow-up message")
+
+        with patch(
+            "agenttester.agent_runner.asyncio.create_subprocess_shell",
+            return_value=proc,
+        ):
+            result = await run_agent(
+                agent,
+                tmp_path,
+                "initial prompt",
+                console,
+                "cyan",
+                lock,
+                input_queue=queue,
+            )
+
+        assert result.exit_code == 0
+        # Initial prompt + follow-up forwarded
+        assert b"initial prompt" in written
+        assert b"follow-up message\n" in written
+
+    @pytest.mark.asyncio
+    async def test_no_input_queue_closes_stdin_after_prompt(
+        self, tmp_path: Path, console: Console, lock: asyncio.Lock
+    ) -> None:
+        agent = AgentConfig(name="test", command="my-agent", timeout=10)
+        proc = _make_mock_proc(returncode=0)
+        stdin = AsyncMock()
+        stdin.write = MagicMock()
+        stdin.drain = AsyncMock()
+        stdin.close = MagicMock()
+        proc.stdin = stdin
+
+        with patch(
+            "agenttester.agent_runner.asyncio.create_subprocess_shell",
+            return_value=proc,
+        ):
+            await run_agent(agent, tmp_path, "prompt", console, "cyan", lock)
+
+        stdin.close.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_called_with_correct_cwd(
         self, tmp_path: Path, console: Console, lock: asyncio.Lock
     ) -> None:
@@ -290,3 +346,102 @@ class TestRunAgentRemote:
         remote = AgentConfig(name="r", command="x", host="user@box")
         assert not local.is_remote
         assert remote.is_remote
+
+
+class TestWatchdogPauseResume:
+    @pytest.mark.asyncio
+    async def test_watchdog_sigstops_idle_agent(
+        self, tmp_path: Path, console: Console, lock: asyncio.Lock
+    ) -> None:
+        agent = AgentConfig(name="test", command="my-agent", timeout=60, idle_timeout=1)
+        # returncode=None simulates running; slow wait gives watchdog time to fire
+        proc = _make_mock_proc(returncode=None)
+        proc.returncode = None
+
+        async def _slow_wait() -> int:
+            await asyncio.sleep(1.5)
+            return 0
+
+        proc.wait = _slow_wait
+        stdin = AsyncMock()
+        stdin.write = MagicMock()
+        stdin.drain = AsyncMock()
+        stdin.close = MagicMock()
+        proc.stdin = stdin
+        proc.pid = 9999
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        with (
+            patch(
+                "agenttester.agent_runner.asyncio.create_subprocess_shell",
+                return_value=proc,
+            ),
+            patch("agenttester.agent_runner.os.killpg") as mock_killpg,
+        ):
+            result = await run_agent(
+                agent, tmp_path, "prompt", console, "cyan", lock, input_queue=queue
+            )
+
+        assert result.exit_code == 0
+        mock_killpg.assert_any_call(9999, signal.SIGSTOP)
+
+    @pytest.mark.asyncio
+    async def test_watchdog_sigconts_on_input_after_pause(
+        self, tmp_path: Path, console: Console, lock: asyncio.Lock
+    ) -> None:
+        agent = AgentConfig(name="test", command="my-agent", timeout=60, idle_timeout=1)
+        proc = _make_mock_proc(returncode=None)
+        proc.returncode = None
+
+        async def _slow_wait() -> int:
+            await asyncio.sleep(2.0)
+            return 0
+
+        proc.wait = _slow_wait
+        stdin = AsyncMock()
+        written: list[bytes] = []
+        stdin.write = MagicMock(side_effect=written.append)
+        stdin.drain = AsyncMock()
+        stdin.close = MagicMock()
+        proc.stdin = stdin
+        proc.pid = 9999
+
+        killpg_calls: list[tuple] = []
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _delayed_message() -> None:
+            await asyncio.sleep(1.5)
+            await queue.put("resume me")
+
+        def fake_killpg(pgid: int, sig: int) -> None:
+            killpg_calls.append((pgid, sig))
+
+        with (
+            patch(
+                "agenttester.agent_runner.asyncio.create_subprocess_shell",
+                return_value=proc,
+            ),
+            patch("agenttester.agent_runner.os.killpg", side_effect=fake_killpg),
+        ):
+            feeder = asyncio.create_task(_delayed_message())
+            result = await run_agent(
+                agent, tmp_path, "prompt", console, "cyan", lock, input_queue=queue
+            )
+            await feeder
+
+        assert result.exit_code == 0
+        sigs = [sig for _, sig in killpg_calls]
+        assert signal.SIGSTOP in sigs
+        assert signal.SIGCONT in sigs
+        stop_idx = next(i for i, s in enumerate(sigs) if s == signal.SIGSTOP)
+        cont_idx = next(i for i, s in enumerate(sigs) if s == signal.SIGCONT)
+        assert stop_idx < cont_idx
+
+    def test_idle_timeout_default(self) -> None:
+        agent = AgentConfig(name="t", command="x")
+        assert agent.idle_timeout == 30
+
+    def test_idle_timeout_configurable(self) -> None:
+        agent = AgentConfig(name="t", command="x", idle_timeout=120)
+        assert agent.idle_timeout == 120

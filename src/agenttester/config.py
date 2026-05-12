@@ -46,6 +46,7 @@ def _load_agents_from_file(config_path: Path) -> dict[str, AgentConfig]:
             commit_style=agent_data.get("commit_style", "auto"),
             env=agent_data.get("env", {}),
             timeout=agent_data.get("timeout", 600),
+            idle_timeout=agent_data.get("idle_timeout", 30),
         )
     return result
 
@@ -102,11 +103,17 @@ class AgentConfig:
     commit_style: str = "auto"  # "auto" (agent commits) or "manual" (we commit)
     env: dict[str, str] = field(default_factory=dict)
     timeout: int = 600  # seconds
+    idle_timeout: int = 30  # seconds of no output before pausing
 
     @property
     def is_remote(self) -> bool:
         """True when the agent runs on a non-local host."""
         return self.host != "localhost"
+
+    @property
+    def uses_stdin(self) -> bool:
+        """True when the agent reads the prompt from stdin (no placeholder)."""
+        return "{prompt}" not in self.command and "{prompt_file}" not in self.command
 
 
 def load_config(config_path: Path | None = None) -> dict[str, AgentConfig]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shlex
 import signal
@@ -109,13 +110,22 @@ async def run_agent(
     console: Console,
     color: str,
     output_lock: asyncio.Lock,
+    input_queue: asyncio.Queue | None = None,
 ) -> AgentResult:
-    """Run an agent locally or on a remote host."""
+    """Run an agent locally or on a remote host.
+
+    *input_queue* — if provided, messages put into this queue are forwarded to
+    the agent's stdin, enabling interactive back-and-forth. Only meaningful for
+    agents whose command has no ``{prompt}`` placeholder (i.e. ``uses_stdin``).
+    Remote agents do not support interactive input.
+    """
     if agent.is_remote:
         return await _run_remote(
             agent, worktree_path, prompt, console, color, output_lock
         )
-    return await _run_local(agent, worktree_path, prompt, console, color, output_lock)
+    return await _run_local(
+        agent, worktree_path, prompt, console, color, output_lock, input_queue
+    )
 
 
 async def _run_local(
@@ -125,6 +135,7 @@ async def _run_local(
     console: Console,
     color: str,
     output_lock: asyncio.Lock,
+    input_queue: asyncio.Queue | None = None,
 ) -> AgentResult:
     """Run an agent as a local subprocess."""
     start = time.monotonic()
@@ -136,6 +147,7 @@ async def _run_local(
     prefix = f"[{color}]\\[{agent.name}][/{color}]"
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
+    last_output = [time.monotonic()]
 
     proc: asyncio.subprocess.Process | None = None
     try:
@@ -152,17 +164,78 @@ async def _run_local(
         if pipe_stdin and proc.stdin:
             proc.stdin.write(prompt.encode())
             await proc.stdin.drain()
-            proc.stdin.close()
+            if input_queue is None:
+                proc.stdin.close()
+            # else: keep stdin open; _forward_input will close it when done
 
-        await _stream_and_wait(
-            proc,
-            agent.timeout,
-            stdout_lines,
-            stderr_lines,
-            console,
-            prefix,
-            output_lock,
-        )
+        paused = asyncio.Event()
+
+        async def _forward_input() -> None:
+            if proc.stdin is None or input_queue is None:
+                return
+            try:
+                while True:
+                    try:
+                        message = await asyncio.wait_for(input_queue.get(), timeout=1.0)
+                        if paused.is_set():
+                            with contextlib.suppress(
+                                ProcessLookupError, PermissionError
+                            ):
+                                os.killpg(proc.pid, signal.SIGCONT)
+                            paused.clear()
+                            last_output[0] = time.monotonic()
+                            async with output_lock:
+                                console.print(f"  {prefix} [dim](resumed)[/dim]")
+                        proc.stdin.write((message + "\n").encode())
+                        await proc.stdin.drain()
+                    except asyncio.TimeoutError:
+                        if proc.returncode is not None:
+                            break
+            finally:
+                with contextlib.suppress(Exception):
+                    proc.stdin.close()
+
+        async def _watchdog() -> None:
+            if input_queue is None or not pipe_stdin:
+                return
+            while proc.returncode is None:
+                await asyncio.sleep(1.0)
+                if proc.returncode is not None:
+                    break
+                if paused.is_set():
+                    continue
+                elapsed = time.monotonic() - last_output[0]
+                if elapsed >= agent.idle_timeout:
+                    try:
+                        os.killpg(proc.pid, signal.SIGSTOP)
+                    except (ProcessLookupError, PermissionError):
+                        break
+                    paused.set()
+                    async with output_lock:
+                        console.print(
+                            f"  {prefix} [yellow]"
+                            f"(paused after {int(elapsed)}s idle — "
+                            f"resume with @{agent.name}: <message>)[/yellow]"
+                        )
+
+        forward_task = asyncio.create_task(_forward_input())
+        watchdog_task = asyncio.create_task(_watchdog())
+
+        try:
+            await _stream_and_wait(
+                proc,
+                agent.timeout,
+                stdout_lines,
+                stderr_lines,
+                console,
+                prefix,
+                output_lock,
+                last_output,
+            )
+        finally:
+            forward_task.cancel()
+            watchdog_task.cancel()
+            await asyncio.gather(forward_task, watchdog_task, return_exceptions=True)
 
         return AgentResult(
             agent_name=agent.name,
@@ -291,6 +364,7 @@ async def _stream_and_wait(
     console: Console,
     prefix: str,
     output_lock: asyncio.Lock,
+    last_output: list[float] | None = None,
 ) -> None:
     """Stream stdout/stderr and wait, raising TimeoutError on expiry."""
 
@@ -305,6 +379,8 @@ async def _stream_and_wait(
             raw = await stream.readline()
             if not raw:
                 break
+            if last_output is not None:
+                last_output[0] = time.monotonic()
             line = raw.decode("utf-8", errors="replace").rstrip()
             lines.append(line)
             # Escape Rich markup in agent output to avoid parse errors

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import select
+import sys
 import uuid
 from pathlib import Path
 
@@ -16,6 +19,51 @@ from .report import generate_report
 from .skills import load_skills
 
 AGENT_COLORS = ["cyan", "green", "yellow", "magenta", "blue"]
+
+
+async def _user_input_router(
+    queues: dict[str, asyncio.Queue],
+    console: Console,
+    output_lock: asyncio.Lock,
+    done: asyncio.Event,
+) -> None:
+    """Read @agentname: message lines from the terminal and route to that agent only."""
+    if not sys.stdin.isatty():
+        return
+    loop = asyncio.get_event_loop()
+    while not done.is_set():
+        readable = await loop.run_in_executor(
+            None, lambda: select.select([sys.stdin], [], [], 0.5)[0]
+        )
+        if done.is_set():
+            break
+        if not readable:
+            continue
+        line = sys.stdin.readline()
+        if not line:
+            break
+        line = line.rstrip("\n").strip()
+        if not line or not line.startswith("@"):
+            continue
+        rest = line[1:]
+        if ":" not in rest:
+            async with output_lock:
+                console.print("[yellow]Format: @agentname: your message[/yellow]")
+            continue
+        agent_name, _, message = rest.partition(":")
+        agent_name = agent_name.strip()
+        message = message.strip()
+        if agent_name not in queues:
+            available = ", ".join(sorted(queues)) if queues else "none"
+            async with output_lock:
+                console.print(
+                    f"[yellow]Unknown agent '{agent_name}' or agent does not "
+                    f"support interactive input. Available: {available}[/yellow]"
+                )
+            continue
+        await queues[agent_name].put(message)
+        async with output_lock:
+            console.print(f"  [dim]→ sent to {agent_name}[/dim]")
 
 
 def _build_prompt(prompt: str, run_id: str, agent_name: str, skills: str) -> str:
@@ -87,6 +135,21 @@ class Orchestrator:
         # Run agents concurrently
         output_lock = asyncio.Lock()
 
+        # Create input queues only for agents that read from stdin
+        input_queues: dict[str, asyncio.Queue] = {
+            agent.name: asyncio.Queue() for agent in agents if agent.uses_stdin
+        }
+        if input_queues:
+            self.console.print(
+                "[dim]Tip: send input to an agent mid-run with "
+                "[bold]@agentname: your message[/bold][/dim]\n"
+            )
+
+        done_event = asyncio.Event()
+        router_task = asyncio.create_task(
+            _user_input_router(input_queues, self.console, output_lock, done_event)
+        )
+
         async def _run_one(agent: AgentConfig, color: str) -> AgentResult:
             wt = worktrees.get(agent.name)
             if not wt:
@@ -95,7 +158,13 @@ class Orchestrator:
                 )
             agent_prompt = _build_prompt(prompt, run_id, agent.name, self.skills)
             result = await run_agent(
-                agent, wt, agent_prompt, self.console, color, output_lock
+                agent,
+                wt,
+                agent_prompt,
+                self.console,
+                color,
+                output_lock,
+                input_queue=input_queues.get(agent.name),
             )
             # Auto-commit for agents that don't commit themselves
             if agent.commit_style == "manual" and result.exit_code == 0:
@@ -117,6 +186,11 @@ class Orchestrator:
             for i, agent in enumerate(agents)
         ]
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        done_event.set()
+        router_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await router_task
 
         # Normalize results
         results: list[AgentResult] = []

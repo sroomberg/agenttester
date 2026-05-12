@@ -15,6 +15,24 @@ from agenttester.config import (
 )
 
 
+class TestAgentConfigProperties:
+    def test_uses_stdin_no_placeholder(self) -> None:
+        agent = AgentConfig(name="a", command="my-agent --run")
+        assert agent.uses_stdin
+
+    def test_uses_stdin_false_with_prompt_placeholder(self) -> None:
+        agent = AgentConfig(name="a", command="claude -p {prompt}")
+        assert not agent.uses_stdin
+
+    def test_uses_stdin_false_with_prompt_file_placeholder(self) -> None:
+        agent = AgentConfig(name="a", command="aider --file {prompt_file}")
+        assert not agent.uses_stdin
+
+    def test_uses_stdin_false_with_both_placeholders(self) -> None:
+        agent = AgentConfig(name="a", command="agent {prompt} --file {prompt_file}")
+        assert not agent.uses_stdin
+
+
 class TestLoadConfigPresets:
     def test_includes_builtin_presets(self) -> None:
         agents = load_config()
