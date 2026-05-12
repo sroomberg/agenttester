@@ -25,22 +25,36 @@ def _load_dir(directory: Path) -> dict[str, str]:
 def load_skills(repo_path: Path | None = None) -> str:
     """Return combined skill instructions to prepend to every agent prompt.
 
-    Merge order (highest priority wins by filename):
-      local (.agent-tester/skills/) > global (~/.agenttester/skills/) > built-ins
+    Skills are output in priority order so that higher-priority instructions
+    appear later in the prompt (recency bias):
+      built-ins → global user skills → local project skills
+
+    A user skill with the same filename as a built-in replaces it entirely and
+    still appears at the end, ensuring user intent always takes precedence.
     """
-    merged: dict[str, str] = _load_dir(_BUILTIN_SKILLS_DIR)
+    builtin = _load_dir(_BUILTIN_SKILLS_DIR)
 
     global_dir = _get_global_skills_dir()
-    if global_dir:
-        merged.update(_load_dir(global_dir))
+    global_skills = _load_dir(global_dir) if global_dir else {}
 
+    local_skills: dict[str, str] = {}
     if repo_path:
         local_dir = repo_path / ".agent-tester" / "skills"
         if local_dir.is_dir():
-            merged.update(_load_dir(local_dir))
+            local_skills = _load_dir(local_dir)
 
-    if not merged:
-        return ""
+    overridden_by_local = set(local_skills)
+    overridden_by_any = set(global_skills) | overridden_by_local
 
-    sections = [content.strip() for content in merged.values() if content.strip()]
+    sections: list[str] = []
+    for name, content in builtin.items():
+        if name not in overridden_by_any and content.strip():
+            sections.append(content.strip())
+    for name, content in global_skills.items():
+        if name not in overridden_by_local and content.strip():
+            sections.append(content.strip())
+    for content in local_skills.values():
+        if content.strip():
+            sections.append(content.strip())
+
     return "\n\n".join(sections)
