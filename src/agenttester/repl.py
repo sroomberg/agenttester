@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-from .config import CONFIG_CANDIDATES
+from .config import get_config_paths
 from .vllm import check_connection
 from .vllm import query as _vllm_query
 
@@ -30,26 +30,22 @@ class Model:
     messages: list[dict] = field(default_factory=list)
 
 
-def load_models(config_path: Path | None = None) -> dict[str, Model]:
-    if config_path is None:
-        for candidate in CONFIG_CANDIDATES:
-            p = Path(candidate)
-            if p.exists():
-                config_path = p
-                break
-
-    if not config_path or not config_path.exists():
-        return {}
-
-    with open(config_path) as f:
+def _parse_models_from_file(path: Path) -> dict[str, Model]:
+    with open(path) as f:
         data = yaml.safe_load(f) or {}
-
-    models: dict[str, Model] = {}
+    result: dict[str, Model] = {}
     for name, agent_data in (data.get("agents") or {}).items():
         m = _COMMAND_PATTERN.search(agent_data.get("command", ""))
         if m:
-            models[name] = Model(name=name, endpoint=m.group(1), model_id=m.group(2))
+            result[name] = Model(name=name, endpoint=m.group(1), model_id=m.group(2))
+    return result
 
+
+def load_models(config_path: Path | None = None) -> dict[str, Model]:
+    """Load vLLM models from global then local config; local wins on conflicts."""
+    models: dict[str, Model] = {}
+    for path in get_config_paths(config_path):
+        models.update(_parse_models_from_file(path))
     return models
 
 

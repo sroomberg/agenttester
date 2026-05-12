@@ -62,6 +62,23 @@ def _find_local_config(config_path: Path | None) -> Path | None:
     return None
 
 
+def get_config_paths(config_path: Path | None = None) -> list[Path]:
+    """Return existing config paths in priority order (later entries win).
+
+    Order: global config first, then local config.  Callers should process
+    them in sequence, with each layer overriding the previous.
+    """
+    paths: list[Path] = []
+    for global_path in _get_global_config_candidates():
+        if global_path.exists():
+            paths.append(global_path)
+            break
+    local = _find_local_config(config_path)
+    if local is not None:
+        paths.append(local)
+    return paths
+
+
 def get_reports_dir(repo_path: Path, config_path: Path | None = None) -> Path:
     """Return the directory where reports for this project should be stored.
 
@@ -121,20 +138,9 @@ def load_config(config_path: Path | None = None) -> dict[str, AgentConfig]:
 
     Priority: local config > global config > presets.
     """
-    # Level 1: built-in presets
     agents: dict[str, AgentConfig] = {}
     for name, preset in PRESETS.items():
         agents[name] = AgentConfig(name=name, **preset)
-
-    # Level 2: global config (first match wins)
-    for global_path in _get_global_config_candidates():
-        if global_path.exists():
-            agents.update(_load_agents_from_file(global_path))
-            break
-
-    # Level 3: local project config (highest priority)
-    local = _find_local_config(config_path)
-    if local is not None:
-        agents.update(_load_agents_from_file(local))
-
+    for path in get_config_paths(config_path):
+        agents.update(_load_agents_from_file(path))
     return agents

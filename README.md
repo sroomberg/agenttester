@@ -130,13 +130,17 @@ For comparing responses from vLLM model servers interactively, with persistent
 conversation history within a session:
 
 ```bash
-agent-tester repl                        # auto-discovers agent-tester.yaml
+agent-tester repl                        # auto-discovers agent-tester.yaml, falls back to global config
 agent-tester repl --config custom.yaml   # explicit config path
 ```
 
-The REPL discovers any agent in your config whose command uses `query_model.py`,
-fans out each prompt to all of them in parallel, and maintains separate
+The REPL discovers any agent in your config whose command matches the `agenttester query`
+pattern, fans out each prompt to all of them in parallel, and maintains separate
 conversation history per model. Use `/reset` to clear history or `exit` to quit.
+
+Config resolution follows the same priority as `run`: global config first, then local
+(or explicit) config, with local taking precedence on conflicts. Models defined only in
+the global config are available in the REPL even when a local config is present.
 
 See `config.example.yaml` for example vLLM agent entries.
 

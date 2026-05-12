@@ -7,7 +7,12 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+import yaml
+
 from agenttester.repl import Model, _query_all, _query_sync, load_models
+
+_PATCH_GLOBAL = "agenttester.config._get_global_config_candidates"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,6 +34,14 @@ def _vllm_command(endpoint: str, model_id: str) -> str:
 # ---------------------------------------------------------------------------
 # load_models
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_global_config(tmp_path: Path):
+    """Prevent tests from reading the real global config."""
+    missing = tmp_path / "nonexistent_global.yml"
+    with patch(_PATCH_GLOBAL, return_value=[missing]):
+        yield
 
 
 class TestLoadModels:
@@ -87,6 +100,64 @@ class TestLoadModels:
             {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
         )
         assert load_models(cfg)["llama3"].messages == []
+
+    def test_merges_global_and_local_configs(self, tmp_path: Path) -> None:
+        global_cfg = tmp_path / "global.yml"
+        global_cfg.write_text(
+            yaml.dump(
+                {
+                    "agents": {
+                        "global-model": {"command": _vllm_command("http://g:8001", "g")}
+                    }
+                }
+            )
+        )
+        local_cfg = _make_config(
+            tmp_path,
+            {"local-model": {"command": _vllm_command("http://l:8001", "l")}},
+        )
+        with patch(_PATCH_GLOBAL, return_value=[global_cfg]):
+            models = load_models(local_cfg)
+
+        assert "global-model" in models
+        assert "local-model" in models
+
+    def test_local_overrides_global_on_conflict(self, tmp_path: Path) -> None:
+        global_cfg = tmp_path / "global.yml"
+        global_cfg.write_text(
+            yaml.dump(
+                {
+                    "agents": {
+                        "shared": {"command": _vllm_command("http://g:8001", "old")}
+                    }
+                }
+            )
+        )
+        local_cfg = _make_config(
+            tmp_path,
+            {"shared": {"command": _vllm_command("http://l:8001", "new")}},
+        )
+        with patch(_PATCH_GLOBAL, return_value=[global_cfg]):
+            models = load_models(local_cfg)
+
+        assert models["shared"].endpoint == "http://l:8001"
+        assert models["shared"].model_id == "new"
+
+    def test_falls_back_to_global_when_no_local(self, tmp_path: Path) -> None:
+        global_cfg = tmp_path / "global.yml"
+        global_cfg.write_text(
+            yaml.dump(
+                {
+                    "agents": {
+                        "g-model": {"command": _vllm_command("http://g:8001", "g")}
+                    }
+                }
+            )
+        )
+        with patch(_PATCH_GLOBAL, return_value=[global_cfg]):
+            models = load_models()
+
+        assert "g-model" in models
 
 
 # ---------------------------------------------------------------------------
