@@ -8,12 +8,11 @@ import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-from .config import get_config_paths
+from .config import _load_yaml, get_config_paths
 from .vllm import check_connection
 from .vllm import query as _vllm_query
 
@@ -31,8 +30,7 @@ class Model:
 
 
 def _parse_models_from_file(path: Path) -> dict[str, Model]:
-    with open(path) as f:
-        data = yaml.safe_load(f) or {}
+    data = _load_yaml(path)
     result: dict[str, Model] = {}
     for name, agent_data in (data.get("agents") or {}).items():
         m = _COMMAND_PATTERN.search(agent_data.get("command", ""))

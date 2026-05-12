@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .config import GLOBAL_CONFIG_DIR
+
 _BUILTIN_SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 def _get_global_skills_dir() -> Path | None:
     """Return the first existing global skills directory."""
-    home = Path.home()
     candidates = [
-        home / ".config" / "agenttester" / "skills",
-        home / ".agenttester" / "skills",
+        GLOBAL_CONFIG_DIR / "skills",
+        Path.home() / ".agenttester" / "skills",
     ]
     return next((p for p in candidates if p.is_dir()), None)
 

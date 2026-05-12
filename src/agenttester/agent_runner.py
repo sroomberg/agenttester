@@ -149,6 +149,16 @@ async def _run_local(
     stderr_lines: list[str] = []
     last_output = [time.monotonic()]
 
+    def _result(exit_code: int, error: str | None = None) -> AgentResult:
+        return AgentResult(
+            agent_name=agent.name,
+            exit_code=exit_code,
+            duration=time.monotonic() - start,
+            stdout="\n".join(stdout_lines),
+            stderr="\n".join(stderr_lines),
+            error=error,
+        )
+
     proc: asyncio.subprocess.Process | None = None
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -237,34 +247,14 @@ async def _run_local(
             watchdog_task.cancel()
             await asyncio.gather(forward_task, watchdog_task, return_exceptions=True)
 
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=proc.returncode or 0,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-        )
+        return _result(proc.returncode or 0)
 
     except TimeoutError:
         _kill_proc_tree(proc)
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=-1,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-            error=f"Timed out after {agent.timeout}s",
-        )
+        return _result(-1, f"Timed out after {agent.timeout}s")
     except Exception as e:
         _kill_proc_tree(proc)
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=-1,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-            error=str(e),
-        )
+        return _result(-1, str(e))
     finally:
         if prompt_file_path:
             prompt_file_path.unlink(missing_ok=True)
@@ -284,6 +274,16 @@ async def _run_remote(
     prefix = f"[{color}]\\[{agent.name}][/{color}]"
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
+
+    def _result(exit_code: int, error: str | None = None) -> AgentResult:
+        return AgentResult(
+            agent_name=agent.name,
+            exit_code=exit_code,
+            duration=time.monotonic() - start,
+            stdout="\n".join(stdout_lines),
+            stderr="\n".join(stderr_lines),
+            error=error,
+        )
 
     try:
         # 1. Push worktree to remote
@@ -325,32 +325,12 @@ async def _run_remote(
         if prompt_file_path:
             prompt_file_path.unlink(missing_ok=True)
 
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=exit_code,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-        )
+        return _result(exit_code)
 
     except TimeoutError:
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=-1,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-            error=f"Timed out after {agent.timeout}s",
-        )
+        return _result(-1, f"Timed out after {agent.timeout}s")
     except Exception as e:
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=-1,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-            error=str(e),
-        )
+        return _result(-1, str(e))
 
 
 # ── shared streaming helper ───────────────────────────────────────────
