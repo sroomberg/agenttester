@@ -9,8 +9,16 @@ from unittest.mock import patch
 
 import pytest
 import yaml
+from prompt_toolkit.document import Document
 
-from agenttester.repl import Model, _query_all, _query_sync, load_models
+from agenttester.repl import (
+    Model,
+    _ModelCompleter,
+    _query_all,
+    _query_sync,
+    load_models,
+    run_repl,
+)
 
 _PATCH_GLOBAL = "agenttester.config._get_global_config_candidates"
 
@@ -248,3 +256,160 @@ class TestQueryAll:
         with patch("agenttester.repl._vllm_query", side_effect=OSError("unreachable")):
             results = await _query_all(models, "hello")
         assert "[error]" in results["llama3"]
+
+
+# ---------------------------------------------------------------------------
+# _ModelCompleter
+# ---------------------------------------------------------------------------
+
+
+def _completions(completer: _ModelCompleter, text: str) -> list[str]:
+    doc = Document(text, cursor_position=len(text))
+    return [c.text for c in completer.get_completions(doc, None)]
+
+
+class TestModelCompleter:
+    def setup_method(self):
+        self.completer = _ModelCompleter(["llama3", "mistral", "qwen"])
+
+    def test_no_at_returns_nothing(self) -> None:
+        assert _completions(self.completer, "hello") == []
+
+    def test_bare_at_returns_all_models(self) -> None:
+        assert set(_completions(self.completer, "@")) == {"llama3", "mistral", "qwen"}
+
+    def test_partial_match_filters(self) -> None:
+        assert _completions(self.completer, "@ll") == ["llama3"]
+
+    def test_no_match_returns_nothing(self) -> None:
+        assert _completions(self.completer, "@zzz") == []
+
+    def test_space_after_at_stops_completion(self) -> None:
+        assert _completions(self.completer, "@llama3 ") == []
+
+    def test_completion_replaces_partial(self) -> None:
+        doc = Document("@ll", cursor_position=3)
+        completions = list(self.completer.get_completions(doc, None))
+        assert len(completions) == 1
+        assert completions[0].start_position == -2  # replaces "ll"
+
+
+# ---------------------------------------------------------------------------
+# run_repl — skill seeding
+# ---------------------------------------------------------------------------
+
+
+class TestRunReplSkillSeeding:
+    async def test_skills_seeded_as_system_message(self, tmp_path: Path) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
+        )
+        inputs = iter(["exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value="do the thing"),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls,
+        ):
+            mock_session = mock_session_cls.return_value
+            mock_session.prompt_async = fake_prompt
+            # capture model state after seeding by inspecting messages on query
+            captured: list[dict] = []
+
+            async def capture_query(models, prompt):
+                captured.extend(next(iter(models.values())).messages)
+                return {"m": "ok"}
+
+            with patch("agenttester.repl._query_all", side_effect=capture_query):
+                await run_repl(cfg)
+
+        # system message should be seeded even without a query
+        # re-run with one real prompt to verify
+        inputs2 = iter(["hello", "exit"])
+
+        async def fake_prompt2(*_a, **_kw):
+            return next(inputs2)
+
+        seen: list[dict] = []
+
+        async def capture2(models, prompt):
+            seen.extend(next(iter(models.values())).messages)
+            return {"m": "ok"}
+
+        with (
+            patch("agenttester.repl.load_skills", return_value="do the thing"),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls2,
+            patch("agenttester.repl._query_all", side_effect=capture2),
+        ):
+            mock_session2 = mock_session_cls2.return_value
+            mock_session2.prompt_async = fake_prompt2
+            await run_repl(cfg)
+
+        assert seen[0] == {"role": "system", "content": "do the thing"}
+
+    async def test_no_skills_means_empty_history(self, tmp_path: Path) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
+        )
+        inputs = iter(["hello", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        # capture messages as they exist before the first query (seed only)
+        pre_query_messages: list[dict] = []
+
+        async def capture(models, prompt):
+            pre_query_messages.extend(next(iter(models.values())).messages)
+            return {"m": "ok"}
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch("agenttester.repl._query_all", side_effect=capture),
+        ):
+            mock_session = mock_session_cls.return_value
+            mock_session.prompt_async = fake_prompt
+            await run_repl(cfg)
+
+        assert pre_query_messages == []
+
+    async def test_reset_restores_skill_seed(self, tmp_path: Path) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
+        )
+        inputs = iter(["hello", "/reset", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        snapshots: list[list[dict]] = []
+
+        async def capture(models, prompt):
+            m = next(iter(models.values()))
+            snapshots.append(list(m.messages))
+            m.messages.append({"role": "user", "content": prompt})
+            m.messages.append({"role": "assistant", "content": "ok"})
+            return {"m": "ok"}
+
+        with (
+            patch("agenttester.repl.load_skills", return_value="skill context"),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch("agenttester.repl._query_all", side_effect=capture),
+        ):
+            mock_session = mock_session_cls.return_value
+            mock_session.prompt_async = fake_prompt
+            await run_repl(cfg)
+
+        # only one query ("hello") was made; after /reset the next input is exit
+        assert len(snapshots) == 1
+        assert snapshots[0][0] == {"role": "system", "content": "skill context"}

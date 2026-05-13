@@ -8,17 +8,37 @@ import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
 
 from .config import _load_yaml, get_config_paths
+from .skills import load_skills
 from .vllm import check_connection
 from .vllm import query as _vllm_query
 
 _COMMAND_PATTERN = re.compile(
     r"agent-?tester\s+query\s+(https?://\S+)\s+(\S+)\s+\{prompt\}"
 )
+_AT_PATTERN = re.compile(r"^@(\S*)$|^@(\S+)\s")
+
+
+class _ModelCompleter(Completer):
+    def __init__(self, model_names: list[str]) -> None:
+        self._names = model_names
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        at_pos = text.rfind("@")
+        if at_pos == -1:
+            return
+        partial = text[at_pos + 1 :]
+        if " " in partial:
+            return
+        for name in self._names:
+            if name.startswith(partial):
+                yield Completion(name, start_position=-len(partial))
 
 
 @dataclass
@@ -119,32 +139,64 @@ async def run_repl(config_path: Path | None = None, skip_checks: bool = False) -
 
         models = live_models
 
-    console.print(
-        "\n[dim]Commands: /reset (clear history), exit or Ctrl-C to quit[/dim]\n"
+    skill_text = load_skills(Path.cwd())
+    seed: list[dict] = (
+        [{"role": "system", "content": skill_text}] if skill_text else []
     )
+    for model in models.values():
+        model.messages = list(seed)
+
+    if seed:
+        console.print("[dim]Skills loaded into context.[/dim]")
+
+    console.print(
+        "\n[dim]Commands: /reset (clear history), @model <msg> to address one model, "
+        "exit or Ctrl-C to quit[/dim]\n"
+    )
+
+    session: PromptSession = PromptSession(completer=_ModelCompleter(list(models)))
 
     while True:
         try:
-            prompt = Prompt.ask("[bold cyan]>[/bold cyan]")
+            raw = await session.prompt_async("> ")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             break
 
-        prompt = prompt.strip()
-        if not prompt:
+        raw = raw.strip()
+        if not raw:
             continue
-        if prompt == "exit":
+        if raw == "exit":
             break
-        if prompt == "/reset":
+        if raw == "/reset":
             for model in models.values():
-                model.messages.clear()
+                model.messages = list(seed)
             console.print("[dim]Context cleared.[/dim]\n")
             continue
 
-        n = len(models)
+        # @model routing: "@name rest of message" targets a single model
+        if raw.startswith("@"):
+            parts = raw[1:].split(None, 1)
+            target_name = parts[0] if parts else ""
+            if target_name not in models:
+                known = ", ".join(f"@{n}" for n in models)
+                console.print(
+                    f"[yellow]Unknown model '{target_name}'. Known: {known}[/yellow]\n"
+                )
+                continue
+            prompt_text = parts[1] if len(parts) > 1 else ""
+            if not prompt_text:
+                console.print("[yellow]No message after @model.[/yellow]\n")
+                continue
+            target_models = {target_name: models[target_name]}
+        else:
+            prompt_text = raw
+            target_models = models
+
+        n = len(target_models)
         label = "model" if n == 1 else "models"
         with console.status(f"[dim]Querying {n} {label}…[/dim]"):
-            responses = await _query_all(models, prompt)
+            responses = await _query_all(target_models, prompt_text)
         console.print()
         for name, reply in responses.items():
             console.print(

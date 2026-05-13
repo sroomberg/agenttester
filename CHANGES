@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.0 — 2026-05-13
+- **REPL `@`-autocomplete**: typing `@` in the REPL now autocompletes model names as you type; `@modelname message` routes a message to a single model instead of broadcasting to all
+- **Skills injected into REPL context**: skill instructions are loaded at REPL startup and seeded as a system message for each model; `/reset` restores to this seeded state rather than fully empty history
+
 ## v0.6.0 — 2026-05-13
 - **Descriptive branch names**: branches are now `agenttester/<agent-name>/<run-name>` instead of `agenttester/<run-id>/<agent-name>`; use `--name` to provide a human-readable run name, or a slug is derived from the prompt automatically
 - **LLM-based code evaluation**: configure multiple independent LLM evaluators (Anthropic API or any OpenAI-compatible endpoint such as vllmd) to review each agent's diff for accuracy, readability, code smells, and correctness
