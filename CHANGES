@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.5.2 — 2026-05-12
+- Fix test suite running real agent orchestrator: mock `Orchestrator` in CLI test to prevent worktree/branch/report side-effects and cut test time from 220s to 5s
+
 ## v0.5.1 — 2026-05-12
 - Consolidate duplicated patterns across `agent_runner`, `repl`, and `skills`
 - Consolidate config path resolution into `get_config_paths()`; fix REPL global config fallback
