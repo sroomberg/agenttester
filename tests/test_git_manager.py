@@ -41,7 +41,7 @@ class TestCreateWorktree:
         gm.create_worktree("testagent", "run123")
         repo = git.Repo(tmp_git_repo)
         branch_names = [b.name for b in repo.branches]
-        assert "agenttester/run123/testagent" in branch_names
+        assert "agenttester/testagent/run123" in branch_names
 
 
 class TestCommitAll:
@@ -65,7 +65,7 @@ class TestGetDiffStats:
         (wt / "new.py").write_text("print('hello')\n")
         gm.commit_all(wt, "testagent")
 
-        stats = gm.get_diff_stats("run3", "testagent", base)
+        stats = gm.get_diff_stats("testagent", "run3", base)
         assert stats.files_changed == 1
         assert stats.insertions >= 1
         assert "new.py" in stats.changed_files
@@ -75,7 +75,7 @@ class TestGetDiffStats:
         base = gm.get_head_ref()
         gm.create_worktree("testagent", "run4")
 
-        stats = gm.get_diff_stats("run4", "testagent", base)
+        stats = gm.get_diff_stats("testagent", "run4", base)
         assert stats.files_changed == 0
         assert stats.changed_files == []
 

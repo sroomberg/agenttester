@@ -72,15 +72,17 @@ class GitManager:
         except Exception:
             return False
 
-    def create_worktree(self, agent_name: str, run_id: str) -> Path:
+    def create_worktree(self, agent_name: str, run_name: str) -> Path:
         """Create a worktree with a new branch for an agent run."""
-        branch = f"agenttester/{run_id}/{agent_name}"
-        worktree_path = self.worktree_base / run_id / agent_name
+        branch = f"agenttester/{agent_name}/{run_name}"
+        worktree_path = self.worktree_base / run_name / agent_name
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
         self.repo.git.worktree("add", "-b", branch, str(worktree_path))
         return worktree_path
 
-    def commit_all(self, worktree_path: Path, agent_name: str) -> bool:
+    def commit_all(
+        self, worktree_path: Path, agent_name: str, iteration: int = 1
+    ) -> bool:
         """Stage and commit all changes in a worktree.
 
         Returns True if a commit was created.
@@ -90,12 +92,14 @@ class GitManager:
         wt_repo.git.add("-A")
         if not wt_repo.index.diff("HEAD"):
             return False
-        wt_repo.index.commit(f"agenttester: {agent_name} changes")
+        wt_repo.index.commit(f"agenttester: {agent_name} iter-{iteration}")
         return True
 
-    def get_diff_stats(self, run_id: str, agent_name: str, base_ref: str) -> DiffStats:
+    def get_diff_stats(
+        self, agent_name: str, run_name: str, base_ref: str
+    ) -> DiffStats:
         """Get diff statistics between the base ref and an agent's branch."""
-        branch = f"agenttester/{run_id}/{agent_name}"
+        branch = f"agenttester/{agent_name}/{run_name}"
         try:
             stat_line = self.repo.git.diff("--shortstat", base_ref, branch)
 
@@ -120,15 +124,23 @@ class GitManager:
         except GitCommandError:
             return DiffStats()
 
-    def cleanup_worktree(self, run_id: str, agent_name: str) -> None:
+    def get_diff_text(self, agent_name: str, run_name: str, base_ref: str) -> str:
+        """Return the full unified diff between base_ref and an agent's branch."""
+        branch = f"agenttester/{agent_name}/{run_name}"
+        try:
+            return self.repo.git.diff(base_ref, branch)
+        except GitCommandError:
+            return ""
+
+    def cleanup_worktree(self, run_name: str, agent_name: str) -> None:
         """Remove a single worktree."""
-        worktree_path = self.worktree_base / run_id / agent_name
+        worktree_path = self.worktree_base / run_name / agent_name
         if worktree_path.exists():
             self.repo.git.worktree("remove", str(worktree_path), "--force")
 
-    def cleanup_run(self, run_id: str) -> None:
+    def cleanup_run(self, run_name: str) -> None:
         """Remove all worktrees for a run. Branches are preserved."""
-        run_dir = self.worktree_base / run_id
+        run_dir = self.worktree_base / run_name
         if not run_dir.exists():
             return
         for agent_dir in sorted(run_dir.iterdir()):

@@ -10,7 +10,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from .config import get_reports_dir, load_config
+from .config import get_reports_dir, load_config, load_evaluators_and_eval_config
 from .cost import CostTracker
 from .orchestrator import Orchestrator
 from .repl import run_repl
@@ -79,6 +79,10 @@ def run(
         Path | None,
         typer.Option("--prompt-file", "-f", help="Read prompt from a file"),
     ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option("--name", "-n", help="Descriptive run name for branch/report"),
+    ] = None,
     keep_worktrees: Annotated[
         bool,
         typer.Option("--keep-worktrees", help="Keep worktrees after the run"),
@@ -139,10 +143,18 @@ def run(
     repo_path = _find_git_root(repo or Path.cwd())
     reports_dir = get_reports_dir(repo_path, config)
     orchestrator = Orchestrator(repo_path, console, reports_dir)
+    evaluators, eval_config = load_evaluators_and_eval_config(config)
 
     try:
         asyncio.run(
-            orchestrator.run(prompt_text, selected, keep_worktrees=keep_worktrees)
+            orchestrator.run(
+                prompt_text,
+                selected,
+                run_name=name,
+                keep_worktrees=keep_worktrees,
+                evaluators=evaluators or None,
+                eval_config=eval_config,
+            )
         )
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")

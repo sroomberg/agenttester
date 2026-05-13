@@ -2,7 +2,7 @@
 
 > **⚠️ Experimental** — This project is under active development. APIs, config format, and CLI flags may change without notice.
 
-Send a single prompt to multiple coding agents running in parallel and compare the results. Each agent works in its own [git worktree](https://git-scm.com/docs/git-worktree) on a separate branch so they never interfere with each other.
+Send a single prompt to multiple coding agents running in parallel and compare the results. Each agent works in its own [git worktree](https://git-scm.com/docs/git-worktree) on a separate branch so they never interfere with each other. Optionally, configure LLM evaluators to review each agent's diff and drive an iterative refinement loop.
 
 ## Install
 
@@ -18,6 +18,9 @@ agent-tester agents
 
 # Run two agents on the same prompt
 agent-tester run "Add unit tests for the auth module" --agents claude,aider
+
+# Give the run a descriptive name (used in branch and report filenames)
+agent-tester run "Refactor auth module" --agents claude,aider --name auth-refactor
 
 # Use a prompt file
 agent-tester run --prompt-file task.md --agents claude,codex,aider
@@ -35,11 +38,13 @@ agent-tester run "Refactor logging" --agents claude,aider --keep-worktrees
 5. A markdown comparison report is generated with diff stats and timing
 6. Worktrees are cleaned up (branches are preserved for `git diff`)
 
-Branches are named `agenttester/<run-id>/<agent-name>` so you can compare results:
+Branches are named `agenttester/<agent-name>/<run-name>` so you can compare results:
 
 ```bash
-git diff agenttester/a3f2c1d0/claude agenttester/a3f2c1d0/aider
+git diff agenttester/claude/auth-refactor agenttester/aider/auth-refactor
 ```
+
+When no `--name` is given, a slug is derived from the first six words of the prompt plus a short hash (e.g. `add-unit-tests-for-the-auth-a3f2c1`).
 
 ## Configuration
 
@@ -124,6 +129,48 @@ your-repo/.agent-tester/skills/testing.md # overrides for this project only
 your-repo/.agent-tester/skills/style.md   # adds a new skill for this project
 ```
 
+## LLM-Based Code Evaluation
+
+Configure one or more LLM evaluators to review each agent's diff after it runs. Multiple independent reviewers reduce the risk of hallucinated assessments, and an aggregate report is synthesized from all of them.
+
+Add an `evaluators` block to your `agent-tester.yaml`:
+
+```yaml
+evaluators:
+  - name: claude
+    api: anthropic          # uses ANTHROPIC_API_KEY
+    model: claude-opus-4-7
+
+  - name: llama3
+    endpoint: http://localhost:8004   # any OpenAI-compatible endpoint
+    model: meta-llama/Meta-Llama-3-70B-Instruct
+
+evaluation:
+  inject_raw_reports: false   # true → send raw reports instead of aggregate
+  max_aggregate_tokens: 2000  # aggregate is summarized before injection if too long
+```
+
+After each iteration, each evaluator independently critiques every agent's diff for:
+- **Accuracy** — does the code implement what was asked?
+- **Readability** — is it clear and well-named?
+- **Code smells** — duplication, dead code, poor design
+- **Correctness** — bugs, missed edge cases, unsafe patterns
+
+An aggregate assessment is then synthesized across evaluators. The terminal shows the aggregate; raw per-evaluator reports are preserved in the markdown report.
+
+### Iterative Refinement
+
+When evaluators are configured, AgentTester enters a refinement loop:
+
+1. Agents run and commit their changes (`iter-1` commit message)
+2. Evaluators review each agent's diff
+3. You select which agents to re-run (1–all, or press Enter to stop)
+4. Selected agents re-run with the aggregate feedback injected into their prompt
+5. New commits are appended to the same branch (`iter-2`, `iter-3`, …)
+6. New evaluator reports are generated for each iteration
+
+All iterations land on the same branch — use `git log` to see the progression.
+
 ## Interactive Model REPL
 
 For comparing responses from vLLM model servers interactively, with persistent
@@ -177,7 +224,7 @@ async def main():
     agents = load_config()
     selected = [agents["claude"], agents["aider"]]
     orch = Orchestrator(repo, Console(), get_reports_dir(repo))
-    results = await orch.run("Add unit tests", selected)
+    results = await orch.run("Add unit tests", selected, run_name="add-tests")
     for r in results:
         print(f"{r.agent_name}: exit={r.exit_code} duration={r.duration:.1f}s")
 

@@ -10,8 +10,11 @@ import pytest
 from agenttester.config import (
     GLOBAL_CONFIG_DIR,
     AgentConfig,
+    EvaluationConfig,
+    _make_run_slug,
     get_reports_dir,
     load_config,
+    load_evaluators_and_eval_config,
 )
 
 
@@ -294,6 +297,100 @@ class TestInvalidYaml:
         config_file.write_text('agents:\n  custom:\n    command: "agent {prompt}"\n')
         agents = load_config(config_file)
         assert "custom" in agents
+
+
+class TestMakeRunSlug:
+    def test_uses_name_when_provided(self) -> None:
+        slug = _make_run_slug("fix the auth bug", name="auth-refactor")
+        assert slug == "auth-refactor"
+
+    def test_sanitises_name(self) -> None:
+        slug = _make_run_slug("anything", name="My Feature / Fix!")
+        assert " " not in slug
+        assert "/" not in slug
+        assert "!" not in slug
+
+    def test_derives_from_prompt_words(self) -> None:
+        slug = _make_run_slug("add error handling to the database module")
+        assert "add" in slug
+        assert "error" in slug
+
+    def test_includes_hash_suffix(self) -> None:
+        slug = _make_run_slug("some prompt")
+        parts = slug.rsplit("-", 1)
+        assert len(parts) == 2
+        assert len(parts[1]) == 6
+
+    def test_same_prompt_same_slug(self) -> None:
+        assert _make_run_slug("hello world") == _make_run_slug("hello world")
+
+    def test_different_prompts_different_slug(self) -> None:
+        assert _make_run_slug("prompt one") != _make_run_slug("prompt two")
+
+    def test_empty_name_falls_back_to_prompt(self) -> None:
+        slug = _make_run_slug("fix the bug", name="")
+        assert "fix" in slug
+
+
+class TestLoadEvaluatorsAndEvalConfig:
+    def test_returns_empty_when_no_evaluators(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text('agents:\n  a:\n    command: "x {prompt}"\n')
+        evaluators, eval_config = load_evaluators_and_eval_config(config_file)
+        assert evaluators == []
+        assert isinstance(eval_config, EvaluationConfig)
+
+    def test_loads_anthropic_evaluator(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "evaluators:\n"
+            "  - name: claude\n"
+            "    api: anthropic\n"
+            "    model: claude-opus-4-7\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        assert len(evaluators) == 1
+        assert evaluators[0].name == "claude"
+        assert evaluators[0].api == "anthropic"
+        assert evaluators[0].model == "claude-opus-4-7"
+
+    def test_loads_openai_compat_evaluator(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "evaluators:\n"
+            "  - name: llama3\n"
+            "    endpoint: http://localhost:8004\n"
+            "    model: meta-llama/Meta-Llama-3-70B-Instruct\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        assert evaluators[0].endpoint == "http://localhost:8004"
+
+    def test_loads_multiple_evaluators(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "evaluators:\n"
+            "  - name: a\n    api: anthropic\n    model: m1\n"
+            "  - name: b\n    endpoint: http://localhost:8001\n    model: m2\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        assert len(evaluators) == 2
+        assert {e.name for e in evaluators} == {"a", "b"}
+
+    def test_loads_eval_config(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "evaluation:\n  inject_raw_reports: true\n  max_aggregate_tokens: 500\n"
+        )
+        _, eval_config = load_evaluators_and_eval_config(config_file)
+        assert eval_config.inject_raw_reports is True
+        assert eval_config.max_aggregate_tokens == 500
+
+    def test_defaults_when_no_eval_section(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text('agents:\n  a:\n    command: "x"\n')
+        _, eval_config = load_evaluators_and_eval_config(config_file)
+        assert eval_config.inject_raw_reports is False
+        assert eval_config.max_aggregate_tokens == 2000
 
 
 class TestGetReportsDir:

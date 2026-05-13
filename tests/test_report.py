@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agenttester.agent_runner import AgentResult
+from agenttester.evaluator import EvaluatorResult
 from agenttester.git_manager import DiffStats
 from agenttester.report import generate_report
 
@@ -16,7 +17,7 @@ def _mock_git(stats_by_agent: dict[str, DiffStats] | None = None) -> MagicMock:
         files_changed=2, insertions=10, deletions=3, changed_files=["a.py", "b.py"]
     )
     if stats_by_agent:
-        git.get_diff_stats.side_effect = lambda run_id, agent_name, base_ref: (
+        git.get_diff_stats.side_effect = lambda agent_name, run_name, base_ref: (
             stats_by_agent.get(agent_name, default_stats)
         )
     else:
@@ -60,7 +61,7 @@ class TestGenerateReport:
         report = generate_report("r3", "c" * 40, "test", results, _mock_git())
         assert "## agent1" in report
         assert "## agent2" in report
-        assert "`agenttester/r3/agent1`" in report
+        assert "`agenttester/agent1/r3`" in report
 
     def test_includes_changed_files(self) -> None:
         result = AgentResult("agent1", 0, 1.0, "", "", None)
@@ -80,3 +81,44 @@ class TestGenerateReport:
         result = AgentResult("agent1", -1, 1.0, "", "", "Timed out after 10s")
         report = generate_report("r6", "f" * 40, "test", [result], _mock_git())
         assert "Timed out after 10s" in report
+
+    def test_iteration_shown_in_report(self) -> None:
+        result = AgentResult("agent1", 0, 1.0, "", "", None)
+        report = generate_report(
+            "r7", "g" * 40, "test", [result], _mock_git(), iteration=3
+        )
+        assert "**Iteration**: 3" in report
+
+    def test_eval_results_shown_per_agent(self) -> None:
+        result = AgentResult("agent1", 0, 1.0, "", "", None)
+        ev = EvaluatorResult("llama3", "agent1", "Looks good overall.", 2.5)
+        report = generate_report(
+            "r8",
+            "h" * 40,
+            "test",
+            [result],
+            _mock_git(),
+            eval_results={"agent1": [ev]},
+        )
+        assert "### Evaluations" in report
+        assert "llama3" in report
+        assert "Looks good overall." in report
+
+    def test_aggregate_shown_per_agent(self) -> None:
+        result = AgentResult("agent1", 0, 1.0, "", "", None)
+        report = generate_report(
+            "r9",
+            "i" * 40,
+            "test",
+            [result],
+            _mock_git(),
+            aggregates={"agent1": "Aggregate: solid work."},
+        )
+        assert "### Aggregate Assessment" in report
+        assert "Aggregate: solid work." in report
+
+    def test_no_eval_sections_when_not_provided(self) -> None:
+        result = AgentResult("agent1", 0, 1.0, "", "", None)
+        report = generate_report("r10", "j" * 40, "test", [result], _mock_git())
+        assert "### Evaluations" not in report
+        assert "### Aggregate Assessment" not in report

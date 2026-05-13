@@ -66,3 +66,21 @@ agents:
   #   host: localhost
   #   commit_style: manual
   #   timeout: 120
+
+# --- LLM-based code quality evaluation ---
+# After each iteration, each evaluator independently reviews every agent's diff
+# and produces a critique. An aggregate report is synthesized from all reviewers.
+# The user is then prompted to select which agents should refine their code.
+#
+# evaluators:
+#   - name: claude
+#     api: anthropic            # uses ANTHROPIC_API_KEY env var
+#     model: claude-opus-4-7
+#
+#   - name: llama3
+#     endpoint: http://localhost:8004   # OpenAI-compatible endpoint (e.g. vllmd)
+#     model: meta-llama/Meta-Llama-3-70B-Instruct
+#
+# evaluation:
+#   inject_raw_reports: false   # true → send all raw reports to agents instead of aggregate
+#   max_aggregate_tokens: 2000  # aggregate is summarized before injection if it exceeds this

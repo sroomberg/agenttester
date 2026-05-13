@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -110,6 +112,42 @@ def get_reports_dir(repo_path: Path, config_path: Path | None = None) -> Path:
 
 
 @dataclass
+class EvaluatorConfig:
+    """Configuration for a single LLM evaluator."""
+
+    name: str
+    model: str
+    endpoint: str | None = None
+    api: str | None = None
+    api_key_env: str | None = None
+
+
+@dataclass
+class EvaluationConfig:
+    """Settings for the evaluation phase."""
+
+    inject_raw_reports: bool = False
+    max_aggregate_tokens: int = 2000
+
+
+def _make_run_slug(prompt: str, name: str | None = None) -> str:
+    """Return a short, URL-safe identifier for a run.
+
+    Uses *name* directly (sanitised) when provided; otherwise derives a slug
+    from the first six words of *prompt* with a 6-char SHA1 suffix for
+    uniqueness.
+    """
+    if name:
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        return slug[:60] or "run"
+    words = prompt.strip().split()[:6]
+    parts = [re.sub(r"[^a-z0-9]+", "", w.lower()) for w in words]
+    slug = "-".join(p for p in parts if p)[:40]
+    short_hash = hashlib.sha1(prompt.encode()).hexdigest()[:6]
+    return f"{slug}-{short_hash}" if slug else short_hash
+
+
+@dataclass
 class AgentConfig:
     """Configuration for a single coding agent."""
 
@@ -144,3 +182,34 @@ def load_config(config_path: Path | None = None) -> dict[str, AgentConfig]:
     for path in get_config_paths(config_path):
         agents.update(_load_agents_from_file(path))
     return agents
+
+
+def load_evaluators_and_eval_config(
+    config_path: Path | None = None,
+) -> tuple[list[EvaluatorConfig], EvaluationConfig]:
+    """Load evaluator configs and evaluation settings from YAML.
+
+    Local config overrides global; returns empty list and defaults if none found.
+    """
+    evaluators: list[EvaluatorConfig] = []
+    eval_config = EvaluationConfig()
+    for path in get_config_paths(config_path):
+        data = _load_yaml(path)
+        if "evaluators" in data:
+            evaluators = [
+                EvaluatorConfig(
+                    name=ev["name"],
+                    model=ev["model"],
+                    endpoint=ev.get("endpoint"),
+                    api=ev.get("api"),
+                    api_key_env=ev.get("api_key_env"),
+                )
+                for ev in (data["evaluators"] or [])
+            ]
+        if "evaluation" in data:
+            ec = data["evaluation"] or {}
+            eval_config = EvaluationConfig(
+                inject_raw_reports=ec.get("inject_raw_reports", False),
+                max_aggregate_tokens=ec.get("max_aggregate_tokens", 2000),
+            )
+    return evaluators, eval_config

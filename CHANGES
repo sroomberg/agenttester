@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.6.0 — 2026-05-13
+- **Descriptive branch names**: branches are now `agenttester/<agent-name>/<run-name>` instead of `agenttester/<run-id>/<agent-name>`; use `--name` to provide a human-readable run name, or a slug is derived from the prompt automatically
+- **LLM-based code evaluation**: configure multiple independent LLM evaluators (Anthropic API or any OpenAI-compatible endpoint such as vllmd) to review each agent's diff for accuracy, readability, code smells, and correctness
+- **Aggregate reports**: evaluator critiques are synthesized into a single aggregate assessment per agent; raw per-evaluator reports are preserved in the markdown report
+- **Iterative refinement loop**: after evaluation the user selects which agents (1–all) to re-run; selected agents receive the aggregate feedback as context and commit each refinement to the same branch (tracked via `iter-N` commit messages)
+- **Feedback summarization**: aggregate feedback is summarized before injection if it exceeds `max_aggregate_tokens`; set `inject_raw_reports: true` to send all raw evaluator reports instead
+- Worktrees are now kept alive across iterations and only cleaned up when the user stops iterating
+
 ## v0.5.2 — 2026-05-12
 - Fix test suite running real agent orchestrator: mock `Orchestrator` in CLI test to prevent worktree/branch/report side-effects and cut test time from 220s to 5s
 
