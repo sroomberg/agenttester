@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from typer.testing import CliRunner
 
@@ -73,10 +74,10 @@ class TestRunValidation:
         assert result.exit_code != 0
 
     def test_comma_separated_agents_parsed(self) -> None:
-        """Verify comma parsing works — the command will fail at the repo
-        check, but agent parsing should succeed (no 'Unknown agent' error)."""
-        result = runner.invoke(app, ["run", "test", "--agents", "claude,aider"])
-        # Should fail because cwd may not be a git repo, not because of agent parsing
+        """Verify comma-separated --agents values are parsed without error."""
+        with patch("agenttester.cli.Orchestrator") as mock_cls:
+            mock_cls.return_value.run = AsyncMock(return_value=[])
+            result = runner.invoke(app, ["run", "test", "--agents", "claude,aider"])
         assert "Unknown agent" not in result.output
 
 
