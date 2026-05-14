@@ -229,9 +229,8 @@ def repl(
             "--workdir",
             "-w",
             help=(
-                "Enable tool use (bash, file I/O, git) with this directory"
-                " as the working root; if it is a git repo each model gets"
-                " its own branch"
+                "Working directory for tool use and branch creation; defaults"
+                " to CWD so branches always land in the calling repo"
             ),
         ),
     ] = None,

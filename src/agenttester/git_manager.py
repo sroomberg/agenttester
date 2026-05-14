@@ -13,6 +13,19 @@ import git
 from git.exc import GitCommandError
 
 
+def _sanitize_ref_component(name: str) -> str:
+    """Sanitize an arbitrary string to be a safe git ref name component.
+
+    Replaces any character that is not alphanumeric, hyphen, underscore, or
+    dot with a hyphen, then collapses runs of hyphens and strips leading/
+    trailing hyphens and dots.
+    """
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]", "-", name)
+    sanitized = re.sub(r"-{2,}", "-", sanitized)
+    sanitized = sanitized.strip("-.")
+    return sanitized or "unnamed"
+
+
 @dataclass
 class DiffStats:
     """Diff statistics between base ref and an agent's branch."""
@@ -78,8 +91,10 @@ class GitManager:
         Used when resuming a named REPL session where the branch and
         worktree may already exist from a previous invocation.
         """
-        branch = f"agenttester/{agent_name}/{run_name}"
-        worktree_path = self.worktree_base / run_name / agent_name
+        safe_agent = _sanitize_ref_component(agent_name)
+        safe_run = _sanitize_ref_component(run_name)
+        branch = f"agenttester/{safe_agent}/{safe_run}"
+        worktree_path = self.worktree_base / safe_run / safe_agent
 
         if worktree_path.exists():
             return worktree_path
@@ -106,7 +121,10 @@ class GitManager:
         When *pem_path* is provided it is used as the SSH identity file,
         overriding any ``GIT_SSH_COMMAND`` already in the environment.
         """
-        branch = f"agenttester/{agent_name}/{run_name}"
+        branch = (
+            f"agenttester/{_sanitize_ref_component(agent_name)}"
+            f"/{_sanitize_ref_component(run_name)}"
+        )
         if pem_path:
             self.repo.git.update_environment(
                 GIT_SSH_COMMAND=f"ssh -i {pem_path} -o StrictHostKeyChecking=no"
@@ -115,8 +133,10 @@ class GitManager:
 
     def create_worktree(self, agent_name: str, run_name: str) -> Path:
         """Create a worktree with a new branch for an agent run."""
-        branch = f"agenttester/{agent_name}/{run_name}"
-        worktree_path = self.worktree_base / run_name / agent_name
+        safe_agent = _sanitize_ref_component(agent_name)
+        safe_run = _sanitize_ref_component(run_name)
+        branch = f"agenttester/{safe_agent}/{safe_run}"
+        worktree_path = self.worktree_base / safe_run / safe_agent
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
         self.repo.git.worktree("add", "-b", branch, str(worktree_path))
         return worktree_path
@@ -140,7 +160,10 @@ class GitManager:
         self, agent_name: str, run_name: str, base_ref: str
     ) -> DiffStats:
         """Get diff statistics between the base ref and an agent's branch."""
-        branch = f"agenttester/{agent_name}/{run_name}"
+        branch = (
+            f"agenttester/{_sanitize_ref_component(agent_name)}"
+            f"/{_sanitize_ref_component(run_name)}"
+        )
         try:
             stat_line = self.repo.git.diff("--shortstat", base_ref, branch)
 
@@ -167,7 +190,10 @@ class GitManager:
 
     def get_diff_text(self, agent_name: str, run_name: str, base_ref: str) -> str:
         """Return the full unified diff between base_ref and an agent's branch."""
-        branch = f"agenttester/{agent_name}/{run_name}"
+        branch = (
+            f"agenttester/{_sanitize_ref_component(agent_name)}"
+            f"/{_sanitize_ref_component(run_name)}"
+        )
         try:
             return self.repo.git.diff(base_ref, branch)
         except GitCommandError:

@@ -271,33 +271,34 @@ async def run_repl(
                 f" ({n} message(s) across {len(session.histories)} model(s))[/dim]"
             )
 
-    # Worktree + tool use setup
-    if workdir:
-        run_name = session_name or datetime.now().strftime("repl-%Y%m%d-%H%M%S")
-        workdir_path = Path(workdir).resolve()
-        try:
-            git_mgr = GitManager(workdir_path)
-            if git_mgr.has_commits():
-                console.print(f"\n[dim]Setting up worktrees in {workdir_path}…[/dim]")
-                _setup_worktrees(models, git_mgr, run_name, pem_path, console)
-            else:
-                console.print(
-                    "[yellow]workdir has no commits; "
-                    "tools enabled but no branches.[/yellow]"
-                )
-                for model in models.values():
-                    model.tool_executor = ToolExecutor(
-                        workdir=str(workdir_path), pem_path=pem_path
-                    )
-        except Exception:
+    # Worktree + tool use setup — defaults to CWD so branches land in the
+    # repo the REPL is invoked from when --workdir is not explicitly given.
+    run_name = session_name or datetime.now().strftime("repl-%Y%m%d-%H%M%S")
+    workdir_path = Path(workdir).resolve() if workdir else Path.cwd()
+    try:
+        git_mgr = GitManager(workdir_path)
+        if git_mgr.has_commits():
+            console.print(f"\n[dim]Setting up worktrees in {workdir_path}…[/dim]")
+            _setup_worktrees(models, git_mgr, run_name, pem_path, console)
+        else:
             console.print(
-                f"[yellow]{workdir} is not a git repo; "
-                "tools enabled, no branches.[/yellow]"
+                "[yellow]workdir has no commits; "
+                "tools enabled but no branches.[/yellow]"
             )
             for model in models.values():
                 model.tool_executor = ToolExecutor(
                     workdir=str(workdir_path), pem_path=pem_path
                 )
+    except Exception:
+        if workdir:
+            console.print(
+                f"[yellow]{workdir} is not a git repo; "
+                "tools enabled, no branches.[/yellow]"
+            )
+        for model in models.values():
+            model.tool_executor = ToolExecutor(
+                workdir=str(workdir_path), pem_path=pem_path
+            )
 
     # Skill seeding
     skill_text = load_skills(Path.cwd())

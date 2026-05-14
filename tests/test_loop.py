@@ -49,7 +49,11 @@ class TestFinalText:
         provider = _make_provider([{"content": "final", "tool_calls": None}])
         events: list[tuple] = []
         run_agent_loop(
-            provider, "m", [], "q", _make_executor(),
+            provider,
+            "m",
+            [],
+            "q",
+            _make_executor(),
             on_event=lambda t, c: events.append((t, c)),
         )
         assert ("text", "final") in events
@@ -111,7 +115,11 @@ class TestToolCallThenText:
         )
         events: list[tuple] = []
         run_agent_loop(
-            provider, "m", [], "q", _make_executor(),
+            provider,
+            "m",
+            [],
+            "q",
+            _make_executor(),
             on_event=lambda t, c: events.append((t, c)),
         )
         types = [e[0] for e in events]
@@ -147,9 +155,7 @@ class TestMaxTurns:
             ],
         }
         provider = _make_provider([always_tool] * 25)
-        result = run_agent_loop(
-            provider, "m", [], "q", _make_executor(), max_turns=3
-        )
+        result = run_agent_loop(provider, "m", [], "q", _make_executor(), max_turns=3)
         assert "max turns" in result
 
     def test_sentinel_appended_to_messages(self) -> None:

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import git
 
-from agenttester.git_manager import GitManager
+from agenttester.git_manager import GitManager, _sanitize_ref_component
 
 
 class TestHasCommits:
@@ -27,6 +27,29 @@ class TestGetHeadRef:
         sha = gm.get_head_ref()
         assert len(sha) == 40
         assert all(c in "0123456789abcdef" for c in sha)
+
+
+class TestSanitizeRefComponent:
+    def test_alphanumeric_unchanged(self) -> None:
+        assert _sanitize_ref_component("abc123") == "abc123"
+
+    def test_spaces_replaced_with_hyphens(self) -> None:
+        assert _sanitize_ref_component("my session") == "my-session"
+
+    def test_slashes_replaced(self) -> None:
+        assert _sanitize_ref_component("feat/my-thing") == "feat-my-thing"
+
+    def test_collapses_consecutive_hyphens(self) -> None:
+        assert _sanitize_ref_component("a  b") == "a-b"
+
+    def test_strips_leading_trailing_hyphens(self) -> None:
+        assert _sanitize_ref_component(" leading") == "leading"
+
+    def test_empty_string_becomes_unnamed(self) -> None:
+        assert _sanitize_ref_component("") == "unnamed"
+
+    def test_only_special_chars_becomes_unnamed(self) -> None:
+        assert _sanitize_ref_component("@{~^") == "unnamed"
 
 
 class TestCreateWorktree:

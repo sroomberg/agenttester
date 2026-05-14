@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.11.2 — 2026-05-14
+- **Branch name sanitization**: all agent and run names are sanitized to valid git ref components before branch/worktree creation, preventing collisions from spaces, slashes, or other special characters
+- **git.md skill update**: documents the `agenttester/<model-name>/<session-name>` branch format and instructs models not to create new branches
+- **CWD default for workdir**: `agent-tester repl` now defaults to the current directory for tool use and branch creation; pass `--workdir` to override; branches always land in the repo the REPL is called from
+- **Providers package refactor**: `providers.py` split into a `providers/` package (`base.py`, `anthropic.py`, `openai_compat.py`, `bedrock.py`) with a re-exporting `__init__.py`; all existing imports unchanged
+
 ## v0.11.1 — 2026-05-14
 - **Anthropic tool use**: `AnthropicProvider` now supports tool use in the REPL agent loop; messages and tool definitions are automatically converted between OpenAI and Anthropic wire formats so the same agent loop drives all provider types
 - Fix: `AnthropicProvider.call` now correctly separates system messages into Anthropic's top-level `system` field instead of passing them in the `messages` array (which the API rejects)
