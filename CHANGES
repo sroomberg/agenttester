@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.9.1 — 2026-05-14
+- Fix Bedrock tests failing on CI when boto3 is not installed: use `patch.dict(sys.modules)` instead of `patch("boto3.Session")` so tests pass without the `[aws]` extras group
+
 ## v0.9.0 — 2026-05-14
 - **Provider class hierarchy**: replace the flat `ProviderConfig` dataclass with an abstract `Provider` base class and three concrete implementations — `AnthropicProvider`, `OpenAICompatProvider`, and `BedrockProvider`; provider calling logic now lives with the provider class rather than in `evaluator.py`
 - **AWS Bedrock support**: `BedrockProvider` calls the Bedrock Converse API via boto3 (install with `pip install agenttester[aws]`); supports three auth modes: named AWS CLI profile (`aws_profile`), explicit credential env vars (`aws_access_key_id_env` / `aws_secret_access_key_env` / `aws_session_token_env`), and the default boto3 credential chain
