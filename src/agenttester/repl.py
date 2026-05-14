@@ -18,7 +18,12 @@ from rich.panel import Panel
 from .config import _build_named_provider, _load_yaml, get_config_paths
 from .git_manager import GitManager
 from .loop import run_agent_loop
-from .providers import BedrockProvider, OpenAICompatProvider, Provider
+from .providers import (
+    AnthropicProvider,
+    BedrockProvider,
+    OpenAICompatProvider,
+    Provider,
+)
 from .session import ReplSession
 from .skills import load_skills
 from .tools import ToolExecutor
@@ -129,7 +134,9 @@ def load_models(config_path: Path | None = None) -> dict[str, Model]:
 
 
 def _query_sync(model: Model, prompt: str, max_tokens: int = 2048) -> str:
-    if model.tool_executor and isinstance(model.provider, OpenAICompatProvider):
+    if model.tool_executor and isinstance(
+        model.provider, (AnthropicProvider, OpenAICompatProvider)
+    ):
         saved = list(model.messages)
         try:
             return run_agent_loop(
@@ -197,12 +204,8 @@ def _setup_worktrees(
     for model in models.values():
         try:
             wt_path = git_mgr.get_or_create_worktree(model.name, run_name)
-            model.tool_executor = ToolExecutor(
-                workdir=str(wt_path), pem_path=pem_path
-            )
-            console.print(
-                f"  [dim]branch:[/dim] agenttester/{model.name}/{run_name}"
-            )
+            model.tool_executor = ToolExecutor(workdir=str(wt_path), pem_path=pem_path)
+            console.print(f"  [dim]branch:[/dim] agenttester/{model.name}/{run_name}")
         except Exception as e:
             console.print(
                 f"  [yellow]Could not create worktree for {model.name}: {e}[/yellow]"

@@ -14,6 +14,9 @@ from agenttester.providers import (
     BedrockProvider,
     OpenAICompatProvider,
     Provider,
+    _from_anthropic_response,
+    _to_anthropic_messages,
+    _to_anthropic_tools,
 )
 
 
@@ -67,7 +70,7 @@ class TestAnthropicProvider:
 
     def test_call_returns_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        body = {"content": [{"text": "hello from claude"}]}
+        body = {"content": [{"type": "text", "text": "hello from claude"}]}
         with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
             result = AnthropicProvider().call(
                 "claude-opus-4-7", [{"role": "user", "content": "hi"}], 100
@@ -81,7 +84,7 @@ class TestAnthropicProvider:
         def capturing_urlopen(req, timeout=None):
             captured["headers"] = dict(req.headers)
             captured["url"] = req.full_url
-            return _mock_urlopen({"content": [{"text": "ok"}]})
+            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
 
         with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
             AnthropicProvider(api_key_env="MY_ANTHROPIC_KEY").call("model", [], 10)
@@ -95,7 +98,7 @@ class TestAnthropicProvider:
 
         def capturing_urlopen(req, timeout=None):
             captured["payload"] = json.loads(req.data.decode())
-            return _mock_urlopen({"content": [{"text": "ok"}]})
+            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
 
         msgs = [{"role": "user", "content": "test"}]
         with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
@@ -104,6 +107,256 @@ class TestAnthropicProvider:
         assert captured["payload"]["model"] == "claude-opus-4-7"
         assert captured["payload"]["messages"] == msgs
         assert captured["payload"]["max_tokens"] == 256
+
+
+# ---------------------------------------------------------------------------
+# Anthropic format conversion helpers
+# ---------------------------------------------------------------------------
+
+
+class TestToAnthropicTools:
+    def test_converts_openai_format(self) -> None:
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "bash",
+                    "description": "Run a shell command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                },
+            }
+        ]
+        result = _to_anthropic_tools(tools)
+        assert result == [
+            {
+                "name": "bash",
+                "description": "Run a shell command",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+            }
+        ]
+
+    def test_multiple_tools(self) -> None:
+        tools = [
+            {"type": "function", "function": {"name": "a", "parameters": {}}},
+            {"type": "function", "function": {"name": "b", "parameters": {}}},
+        ]
+        result = _to_anthropic_tools(tools)
+        assert [t["name"] for t in result] == ["a", "b"]
+
+
+class TestToAnthropicMessages:
+    def test_plain_messages_unchanged(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        assert _to_anthropic_messages(msgs) == msgs
+
+    def test_groups_tool_results_into_user_message(self) -> None:
+        msgs = [
+            {"role": "tool", "tool_call_id": "id1", "content": "r1"},
+            {"role": "tool", "tool_call_id": "id2", "content": "r2"},
+        ]
+        result = _to_anthropic_messages(msgs)
+        assert result == [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "id1",
+                        "content": "r1",
+                    },
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "id2",
+                        "content": "r2",
+                    },
+                ],
+            }
+        ]
+
+    def test_assistant_tool_calls_converted(self) -> None:
+        msgs = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "function": {
+                            "name": "bash",
+                            "arguments": '{"command": "ls"}',
+                        },
+                    }
+                ],
+            }
+        ]
+        result = _to_anthropic_messages(msgs)
+        assert result == [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "call-1",
+                        "name": "bash",
+                        "input": {"command": "ls"},
+                    }
+                ],
+            }
+        ]
+
+    def test_assistant_text_preserved_alongside_tool_use(self) -> None:
+        msgs = [
+            {
+                "role": "assistant",
+                "content": "I'll do that",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "function": {"name": "bash", "arguments": "{}"},
+                    }
+                ],
+            }
+        ]
+        result = _to_anthropic_messages(msgs)
+        content = result[0]["content"]
+        assert content[0] == {"type": "text", "text": "I'll do that"}
+        assert content[1]["type"] == "tool_use"
+
+
+class TestFromAnthropicResponse:
+    def test_text_only(self) -> None:
+        data = {"content": [{"type": "text", "text": "hello"}]}
+        result = _from_anthropic_response(data)
+        assert result == {"content": "hello", "tool_calls": None}
+
+    def test_tool_use_only(self) -> None:
+        data = {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "id1",
+                    "name": "bash",
+                    "input": {"command": "ls"},
+                }
+            ]
+        }
+        result = _from_anthropic_response(data)
+        assert result["content"] is None
+        assert result["tool_calls"] == [
+            {
+                "id": "id1",
+                "function": {
+                    "name": "bash",
+                    "arguments": '{"command": "ls"}',
+                },
+            }
+        ]
+
+    def test_text_and_tool_use(self) -> None:
+        data = {
+            "content": [
+                {"type": "text", "text": "I'll run that"},
+                {
+                    "type": "tool_use",
+                    "id": "id1",
+                    "name": "bash",
+                    "input": {"command": "ls"},
+                },
+            ]
+        }
+        result = _from_anthropic_response(data)
+        assert result["content"] == "I'll run that"
+        assert result["tool_calls"] is not None
+
+    def test_empty_content(self) -> None:
+        result = _from_anthropic_response({"content": []})
+        assert result == {"content": None, "tool_calls": None}
+
+
+# ---------------------------------------------------------------------------
+# AnthropicProvider.call_raw
+# ---------------------------------------------------------------------------
+
+
+class TestAnthropicProviderCallRaw:
+    def test_returns_normalized_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        body = {"content": [{"type": "text", "text": "hello"}]}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            result = AnthropicProvider().call_raw("model", [], 100)
+        assert result == {"content": "hello", "tool_calls": None}
+
+    def test_separates_system_messages(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        captured: dict = {}
+
+        def capturing_urlopen(req, timeout=None):
+            captured["payload"] = json.loads(req.data.decode())
+            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
+
+        msgs = [
+            {"role": "system", "content": "you are helpful"},
+            {"role": "user", "content": "hello"},
+        ]
+        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+            AnthropicProvider().call_raw("model", msgs, 100)
+        assert captured["payload"]["system"] == "you are helpful"
+        assert captured["payload"]["messages"] == [{"role": "user", "content": "hello"}]
+
+    def test_converts_tools_to_anthropic_format(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        captured: dict = {}
+
+        def capturing_urlopen(req, timeout=None):
+            captured["payload"] = json.loads(req.data.decode())
+            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
+
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "bash",
+                    "description": "run",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+            AnthropicProvider().call_raw("model", [], 100, tools=tools)
+        assert "tools" in captured["payload"]
+        assert captured["payload"]["tools"][0]["name"] == "bash"
+        assert "input_schema" in captured["payload"]["tools"][0]
+
+    def test_omits_tools_when_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        captured: dict = {}
+
+        def capturing_urlopen(req, timeout=None):
+            captured["payload"] = json.loads(req.data.decode())
+            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
+
+        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+            AnthropicProvider().call_raw("model", [], 100)
+        assert "tools" not in captured["payload"]
+
+    def test_call_delegates_to_call_raw(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        body = {"content": [{"type": "text", "text": "delegated"}]}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            result = AnthropicProvider().call("model", [], 100)
+        assert result == "delegated"
 
 
 # ---------------------------------------------------------------------------

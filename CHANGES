@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.11.1 — 2026-05-14
+- **Anthropic tool use**: `AnthropicProvider` now supports tool use in the REPL agent loop; messages and tool definitions are automatically converted between OpenAI and Anthropic wire formats so the same agent loop drives all provider types
+- Fix: `AnthropicProvider.call` now correctly separates system messages into Anthropic's top-level `system` field instead of passing them in the `messages` array (which the API rejects)
+
 ## v0.11.0 — 2026-05-14
 - **Tool use in the REPL**: OpenAI-compatible models in the REPL now run a full agent loop with access to `bash`, `read_file`, `write_file`, `git_clone`, `git_commit`, and `git_push` tools; pass `--workdir` to activate tool use with a target directory
 - **Automatic per-model branches**: when `--workdir` points to a git repo each model gets its own worktree on branch `agenttester/<model-name>/<session-name>`; all changes are automatically committed and can be pushed with `--push`

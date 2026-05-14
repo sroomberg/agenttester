@@ -11,7 +11,11 @@ import pytest
 import yaml
 from prompt_toolkit.document import Document
 
-from agenttester.providers import BedrockProvider, OpenAICompatProvider
+from agenttester.providers import (
+    AnthropicProvider,
+    BedrockProvider,
+    OpenAICompatProvider,
+)
 from agenttester.repl import (
     Model,
     _ModelCompleter,
@@ -374,6 +378,19 @@ class TestQuerySync:
         executor = MagicMock(spec=ToolExecutor)
         model = Model(
             name="m", model_id="llama", provider=provider, tool_executor=executor
+        )
+        with patch(
+            "agenttester.repl.run_agent_loop", return_value="loop reply"
+        ) as mock_loop:
+            result = _query_sync(model, "do it")
+        mock_loop.assert_called_once()
+        assert result == "loop reply"
+
+    def test_anthropic_provider_triggers_agent_loop(self) -> None:
+        provider = MagicMock(spec=AnthropicProvider)
+        executor = MagicMock(spec=ToolExecutor)
+        model = Model(
+            name="m", model_id="claude", provider=provider, tool_executor=executor
         )
         with patch(
             "agenttester.repl.run_agent_loop", return_value="loop reply"
