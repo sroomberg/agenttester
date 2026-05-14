@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +15,23 @@ from agenttester.providers import (
     OpenAICompatProvider,
     Provider,
 )
+
+
+@contextmanager
+def _boto3_mock(client_mock: MagicMock):
+    """Inject boto3/botocore into sys.modules so tests work without the packages."""
+    mock_session = MagicMock()
+    mock_session.client.return_value = client_mock
+    mock_session_cls = MagicMock(return_value=mock_session)
+
+    mock_boto3 = MagicMock()
+    mock_boto3.Session = mock_session_cls
+
+    with patch.dict(
+        sys.modules,
+        {"boto3": mock_boto3, "botocore": MagicMock(), "botocore.config": MagicMock()},
+    ):
+        yield mock_session_cls
 
 
 def _mock_urlopen(body: dict) -> MagicMock:
@@ -173,37 +192,21 @@ class TestBedrockProvider:
         assert p.aws_session_token_env == "TOKEN"
 
     def test_raises_on_missing_boto3(self) -> None:
-        import sys
-
-        boto3_backup = sys.modules.pop("boto3", None)
-        botocore_backup = sys.modules.pop("botocore", None)
-        sys.modules["boto3"] = None  # type: ignore[assignment]
-        try:
-            with pytest.raises(ImportError, match="boto3"):
-                BedrockProvider().call("model", [], 10)
-        finally:
-            if boto3_backup is not None:
-                sys.modules["boto3"] = boto3_backup
-            else:
-                sys.modules.pop("boto3", None)
-            if botocore_backup is not None:
-                sys.modules["botocore"] = botocore_backup
+        absent = {"boto3": None, "botocore": None, "botocore.config": None}
+        with patch.dict(sys.modules, absent), pytest.raises(ImportError, match="boto3"):
+            BedrockProvider().call("model", [], 10)
 
     def test_call_uses_profile_when_set(self) -> None:
         mock_client = MagicMock()
         mock_client.converse.return_value = {
             "output": {"message": {"content": [{"text": "reply"}]}}
         }
-        mock_session = MagicMock()
-        mock_session.client.return_value = mock_client
-
-        with patch("boto3.Session", return_value=mock_session) as mock_session_cls:
+        with _boto3_mock(mock_client) as mock_session_cls:
             result = BedrockProvider(aws_profile="sso-profile").call(
                 "anthropic.claude-3-5-sonnet-20241022-v2:0",
                 [{"role": "user", "content": "hi"}],
                 256,
             )
-
         mock_session_cls.assert_called_once_with(profile_name="sso-profile")
         assert result == "reply"
 
@@ -214,15 +217,11 @@ class TestBedrockProvider:
         mock_client.converse.return_value = {
             "output": {"message": {"content": [{"text": "reply"}]}}
         }
-        mock_session = MagicMock()
-        mock_session.client.return_value = mock_client
-
-        with patch("boto3.Session", return_value=mock_session) as mock_session_cls:
+        with _boto3_mock(mock_client) as mock_session_cls:
             BedrockProvider(
                 aws_access_key_id_env="MY_KEY_ID",
                 aws_secret_access_key_env="MY_SECRET",
             ).call("model", [{"role": "user", "content": "hi"}], 100)
-
         mock_session_cls.assert_called_once_with(
             aws_access_key_id="AKID",
             aws_secret_access_key="secret",
@@ -234,12 +233,8 @@ class TestBedrockProvider:
         mock_client.converse.return_value = {
             "output": {"message": {"content": [{"text": "reply"}]}}
         }
-        mock_session = MagicMock()
-        mock_session.client.return_value = mock_client
-
-        with patch("boto3.Session", return_value=mock_session) as mock_session_cls:
+        with _boto3_mock(mock_client) as mock_session_cls:
             BedrockProvider().call("model", [{"role": "user", "content": "hi"}], 100)
-
         mock_session_cls.assert_called_once_with()
 
     def test_call_separates_system_messages(self) -> None:
@@ -247,16 +242,12 @@ class TestBedrockProvider:
         mock_client.converse.return_value = {
             "output": {"message": {"content": [{"text": "reply"}]}}
         }
-        mock_session = MagicMock()
-        mock_session.client.return_value = mock_client
-
         messages = [
             {"role": "system", "content": "you are helpful"},
             {"role": "user", "content": "hello"},
         ]
-        with patch("boto3.Session", return_value=mock_session):
+        with _boto3_mock(mock_client):
             BedrockProvider().call("model", messages, 100)
-
         call_kwargs = mock_client.converse.call_args[1]
         assert call_kwargs["system"] == [{"text": "you are helpful"}]
         assert call_kwargs["messages"] == [
@@ -268,11 +259,7 @@ class TestBedrockProvider:
         mock_client.converse.return_value = {
             "output": {"message": {"content": [{"text": "reply"}]}}
         }
-        mock_session = MagicMock()
-        mock_session.client.return_value = mock_client
-
-        with patch("boto3.Session", return_value=mock_session):
+        with _boto3_mock(mock_client):
             BedrockProvider().call("model", [{"role": "user", "content": "hi"}], 100)
-
         call_kwargs = mock_client.converse.call_args[1]
         assert "system" not in call_kwargs
