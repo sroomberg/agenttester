@@ -140,9 +140,7 @@ async def run_repl(config_path: Path | None = None, skip_checks: bool = False) -
         models = live_models
 
     skill_text = load_skills(Path.cwd())
-    seed: list[dict] = (
-        [{"role": "system", "content": skill_text}] if skill_text else []
-    )
+    seed: list[dict] = [{"role": "system", "content": skill_text}] if skill_text else []
     for model in models.values():
         model.messages = list(seed)
 
