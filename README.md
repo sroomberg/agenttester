@@ -218,14 +218,25 @@ evaluators:
     model: anthropic.claude-3-5-sonnet-20241022-v2:0
 ```
 
-REPL model agents support `provider` and `api_key_env` for OpenAI-compatible endpoints:
+REPL models support any provider type — including Bedrock — through a `models:` section that accepts the same `provider` references as evaluators:
 
 ```yaml
-agents:
-  azure-llm:
-    command: 'agent-tester query https://my-resource.openai.azure.com gpt-4o {prompt}'
-    provider: azure           # inherits api_key_env from azure provider
+models:
+  claude-bedrock:
+    provider: bedrock-sso           # references a named bedrock provider
+    model: anthropic.claude-3-5-sonnet-20241022-v2:0
+
+  azure-gpt4o:
+    provider: azure                 # references a named openai provider
+    model: gpt-4o
+
+  local-llm:
+    endpoint: http://localhost:8001 # inline OpenAI-compatible endpoint
+    model: meta-llama/Meta-Llama-3-8B-Instruct
+    api_key_env: MY_KEY             # optional bearer token
 ```
+
+Agent entries whose command matches `agent-tester query <endpoint> <model> {prompt}` are also discovered automatically for backward compatibility.
 
 After each iteration, each evaluator independently critiques every agent's diff for:
 - **Accuracy** — does the code implement what was asked?
@@ -258,15 +269,14 @@ agent-tester repl                        # auto-discovers agent-tester.yaml, fal
 agent-tester repl --config custom.yaml   # explicit config path
 ```
 
-The REPL discovers any agent in your config whose command matches the `agenttester query`
-pattern, fans out each prompt to all of them in parallel, and maintains separate
-conversation history per model. Use `/reset` to clear history or `exit` to quit.
+The REPL fans out each prompt to all configured models in parallel and maintains separate
+conversation history per model. Use `/reset` to clear history, `@modelname message` to
+address a single model, or `exit` to quit. Tab-completes model names after `@`.
 
 Config resolution follows the same priority as `run`: global config first, then local
-(or explicit) config, with local taking precedence on conflicts. Models defined only in
-the global config are available in the REPL even when a local config is present.
+(or explicit) config, with local taking precedence on conflicts.
 
-See `config.example.yaml` for example vLLM agent entries.
+See `config.example.yaml` for full configuration examples.
 
 ## Development
 

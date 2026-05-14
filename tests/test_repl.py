@@ -5,12 +5,13 @@ from __future__ import annotations
 import urllib.error
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 from prompt_toolkit.document import Document
 
+from agenttester.providers import BedrockProvider, OpenAICompatProvider
 from agenttester.repl import (
     Model,
     _ModelCompleter,
@@ -71,7 +72,8 @@ class TestLoadModels:
             {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
         )
         m = load_models(cfg)["llama3"]
-        assert m.endpoint == "http://h:8001"
+        assert isinstance(m.provider, OpenAICompatProvider)
+        assert m.provider.endpoint == "http://h:8001"
         assert m.model_id == "llama/Llama-3-8B"
 
     def test_ignores_non_vllm_agents(self, tmp_path: Path) -> None:
@@ -124,7 +126,7 @@ class TestLoadModels:
             )
         )
         m = load_models(cfg)["azure-llm"]
-        assert m.api_key_env == "MY_AZURE_KEY"
+        assert m.provider.api_key_env == "MY_AZURE_KEY"
 
     def test_model_inherits_provider_api_key_env(self, tmp_path: Path) -> None:
         cfg = tmp_path / "agent-tester.yaml"
@@ -142,7 +144,7 @@ class TestLoadModels:
             )
         )
         m = load_models(cfg)["azure-llm"]
-        assert m.api_key_env == "AZURE_KEY"
+        assert m.provider.api_key_env == "AZURE_KEY"
 
     def test_model_level_api_key_env_overrides_provider(self, tmp_path: Path) -> None:
         cfg = tmp_path / "agent-tester.yaml"
@@ -161,14 +163,14 @@ class TestLoadModels:
             )
         )
         m = load_models(cfg)["azure-llm"]
-        assert m.api_key_env == "MODEL_KEY"
+        assert m.provider.api_key_env == "MODEL_KEY"
 
     def test_model_without_api_key_env_defaults_to_none(self, tmp_path: Path) -> None:
         cfg = _make_config(
             tmp_path,
             {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
         )
-        assert load_models(cfg)["llama3"].api_key_env is None
+        assert load_models(cfg)["llama3"].provider.api_key_env is None
 
     def test_merges_global_and_local_configs(self, tmp_path: Path) -> None:
         global_cfg = tmp_path / "global.yml"
@@ -209,7 +211,7 @@ class TestLoadModels:
         with patch(_PATCH_GLOBAL, return_value=[global_cfg]):
             models = load_models(local_cfg)
 
-        assert models["shared"].endpoint == "http://l:8001"
+        assert models["shared"].provider.endpoint == "http://l:8001"
         assert models["shared"].model_id == "new"
 
     def test_falls_back_to_global_when_no_local(self, tmp_path: Path) -> None:
@@ -228,6 +230,78 @@ class TestLoadModels:
 
         assert "g-model" in models
 
+    def test_explicit_models_section_with_named_bedrock_provider(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = tmp_path / "agent-tester.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "providers": {
+                        "bedrock-sso": {
+                            "type": "bedrock",
+                            "region": "us-west-2",
+                            "aws_profile": "my-profile",
+                        }
+                    },
+                    "models": {
+                        "claude-bedrock": {
+                            "provider": "bedrock-sso",
+                            "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                        }
+                    },
+                }
+            )
+        )
+        m = load_models(cfg)["claude-bedrock"]
+        assert isinstance(m.provider, BedrockProvider)
+        assert m.provider.region == "us-west-2"
+        assert m.provider.aws_profile == "my-profile"
+        assert m.model_id == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+    def test_explicit_models_section_with_inline_endpoint(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "agent-tester.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "models": {
+                        "my-llm": {
+                            "endpoint": "http://host:8001",
+                            "model": "llama3",
+                        }
+                    }
+                }
+            )
+        )
+        m = load_models(cfg)["my-llm"]
+        assert isinstance(m.provider, OpenAICompatProvider)
+        assert m.provider.endpoint == "http://host:8001"
+        assert m.model_id == "llama3"
+
+    def test_explicit_models_win_over_agent_commands(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "agent-tester.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "models": {
+                        "shared": {
+                            "endpoint": "http://models:8001",
+                            "model": "from-models-section",
+                        }
+                    },
+                    "agents": {
+                        "shared": {
+                            "command": _vllm_command(
+                                "http://agents:8001", "from-agents"
+                            )
+                        }
+                    },
+                }
+            )
+        )
+        m = load_models(cfg)["shared"]
+        assert m.model_id == "from-models-section"
+
 
 # ---------------------------------------------------------------------------
 # _query_sync
@@ -235,96 +309,63 @@ class TestLoadModels:
 
 
 class TestQuerySync:
+    def _make_model(self, reply: str = "hello") -> tuple[Model, MagicMock]:
+        provider = MagicMock()
+        provider.call.return_value = reply
+        return Model(name="m", model_id="llama", provider=provider), provider
+
     def test_appends_user_and_assistant_messages(self) -> None:
-        model = Model(name="m", endpoint="http://host:8001", model_id="llama")
-        with patch("agenttester.repl._vllm_query", return_value="hello"):
-            _query_sync(model, "hi")
+        model, _ = self._make_model("hello")
+        _query_sync(model, "hi")
         assert model.messages == [
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hello"},
         ]
 
     def test_returns_assistant_content(self) -> None:
-        model = Model(name="m", endpoint="http://host:8001", model_id="llama")
-        with patch("agenttester.repl._vllm_query", return_value="the answer"):
-            result = _query_sync(model, "question")
+        model, _ = self._make_model("the answer")
+        result = _query_sync(model, "question")
         assert result == "the answer"
 
     def test_sends_full_history(self) -> None:
+        provider = MagicMock()
+        provider.call.return_value = "resp 2"
         model = Model(
             name="m",
-            endpoint="http://host:8001",
             model_id="llama",
+            provider=provider,
             messages=[
                 {"role": "user", "content": "turn 1"},
                 {"role": "assistant", "content": "resp 1"},
             ],
         )
-        captured = {}
-
-        def capturing_query(endpoint, model_id, messages, max_tokens=2048, **kwargs):
-            captured["messages"] = list(messages)
-            return "resp 2"
-
-        with patch("agenttester.repl._vllm_query", side_effect=capturing_query):
-            _query_sync(model, "turn 2")
-
-        assert captured["messages"][0] == {"role": "user", "content": "turn 1"}
-        assert captured["messages"][1] == {"role": "assistant", "content": "resp 1"}
-        assert captured["messages"][2] == {"role": "user", "content": "turn 2"}
+        _query_sync(model, "turn 2")
+        messages_sent = provider.call.call_args.args[1]
+        assert messages_sent[0] == {"role": "user", "content": "turn 1"}
+        assert messages_sent[1] == {"role": "assistant", "content": "resp 1"}
+        assert messages_sent[2] == {"role": "user", "content": "turn 2"}
 
     def test_http_error_does_not_corrupt_history(self) -> None:
-        model = Model(name="m", endpoint="http://host:8001", model_id="llama")
-        err = urllib.error.HTTPError(
+        provider = MagicMock()
+        provider.call.side_effect = urllib.error.HTTPError(
             url="http://host:8001",
             code=500,
             msg="Internal Server Error",
             hdrs=None,  # type: ignore[arg-type]
             fp=BytesIO(b"server error"),
         )
-        with patch("agenttester.repl._vllm_query", side_effect=err):
-            result = _query_sync(model, "hi")
+        model = Model(name="m", model_id="llama", provider=provider)
+        result = _query_sync(model, "hi")
         assert model.messages == []
         assert "[error]" in result
 
     def test_connection_error_does_not_corrupt_history(self) -> None:
-        model = Model(name="m", endpoint="http://host:8001", model_id="llama")
-        with patch("agenttester.repl._vllm_query", side_effect=OSError("refused")):
-            result = _query_sync(model, "hi")
+        provider = MagicMock()
+        provider.call.side_effect = OSError("refused")
+        model = Model(name="m", model_id="llama", provider=provider)
+        result = _query_sync(model, "hi")
         assert model.messages == []
         assert "[error]" in result
-
-    def test_passes_api_key_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MY_KEY", "secret-token")
-        model = Model(
-            name="m",
-            endpoint="http://host:8001",
-            model_id="llama",
-            api_key_env="MY_KEY",
-        )
-        captured = {}
-
-        def capturing_query(endpoint, model_id, messages, max_tokens=2048, **kwargs):
-            captured["api_key"] = kwargs.get("api_key")
-            return "ok"
-
-        with patch("agenttester.repl._vllm_query", side_effect=capturing_query):
-            _query_sync(model, "hi")
-
-        assert captured["api_key"] == "secret-token"
-
-    def test_passes_none_api_key_when_not_configured(self) -> None:
-        model = Model(name="m", endpoint="http://host:8001", model_id="llama")
-        captured = {}
-
-        def capturing_query(endpoint, model_id, messages, max_tokens=2048, **kwargs):
-            captured["api_key"] = kwargs.get("api_key")
-            return "ok"
-
-        with patch("agenttester.repl._vllm_query", side_effect=capturing_query):
-            _query_sync(model, "hi")
-
-        assert captured["api_key"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -334,20 +375,20 @@ class TestQuerySync:
 
 class TestQueryAll:
     async def test_queries_all_models(self) -> None:
-        models = {
-            "llama3": Model(name="llama3", endpoint="http://a:8001", model_id="llama"),
-            "mistral": Model(name="mistral", endpoint="http://a:8002", model_id="m"),
-        }
-        with patch("agenttester.repl._vllm_query", return_value="ok"):
-            results = await _query_all(models, "hello")
+        def _make(name: str) -> Model:
+            provider = MagicMock()
+            provider.call.return_value = "ok"
+            return Model(name=name, model_id="llama", provider=provider)
+
+        models = {"llama3": _make("llama3"), "mistral": _make("mistral")}
+        results = await _query_all(models, "hello")
         assert set(results.keys()) == {"llama3", "mistral"}
 
     async def test_returns_error_string_on_exception(self) -> None:
-        models = {
-            "llama3": Model(name="llama3", endpoint="http://a:8001", model_id="llama"),
-        }
-        with patch("agenttester.repl._vllm_query", side_effect=OSError("unreachable")):
-            results = await _query_all(models, "hello")
+        provider = MagicMock()
+        provider.call.side_effect = OSError("unreachable")
+        models = {"llama3": Model(name="llama3", model_id="llama", provider=provider)}
+        results = await _query_all(models, "hello")
         assert "[error]" in results["llama3"]
 
 
@@ -410,7 +451,6 @@ class TestRunReplSkillSeeding:
         ):
             mock_session = mock_session_cls.return_value
             mock_session.prompt_async = fake_prompt
-            # capture model state after seeding by inspecting messages on query
             captured: list[dict] = []
 
             async def capture_query(models, prompt):
@@ -420,8 +460,6 @@ class TestRunReplSkillSeeding:
             with patch("agenttester.repl._query_all", side_effect=capture_query):
                 await run_repl(cfg)
 
-        # system message should be seeded even without a query
-        # re-run with one real prompt to verify
         inputs2 = iter(["hello", "exit"])
 
         async def fake_prompt2(*_a, **_kw):
@@ -455,7 +493,6 @@ class TestRunReplSkillSeeding:
         async def fake_prompt(*_a, **_kw):
             return next(inputs)
 
-        # capture messages as they exist before the first query (seed only)
         pre_query_messages: list[dict] = []
 
         async def capture(models, prompt):
@@ -503,6 +540,5 @@ class TestRunReplSkillSeeding:
             mock_session.prompt_async = fake_prompt
             await run_repl(cfg)
 
-        # only one query ("hello") was made; after /reset the next input is exit
         assert len(snapshots) == 1
         assert snapshots[0][0] == {"role": "system", "content": "skill context"}
