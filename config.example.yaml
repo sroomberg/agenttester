@@ -68,21 +68,32 @@ agents:
   #   timeout: 120
 
 # --- Cloud LLM providers (optional) ---
-# Define shared endpoints and credentials here; evaluators and agents can
-# reference a provider by name. Model-level fields override provider-level ones.
+# Define shared credentials here; evaluators and agents can reference a
+# provider by name. Model-level fields override provider-level ones.
+# Supported types: openai (any OpenAI-compatible endpoint), anthropic, bedrock.
 #
 # providers:
 #   azure:
+#     type: openai
 #     endpoint: https://my-resource.openai.azure.com
-#     api_key_env: AZURE_OPENAI_KEY          # env var holding the API key
+#     api_key_env: AZURE_OPENAI_KEY        # env var holding the API key
 #
 #   vertex:
-#     endpoint: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/endpoints/openapi
+#     type: openai
+#     endpoint: https://us-central1-aiplatform.googleapis.com/...
 #     api_key_env: VERTEX_AI_KEY
 #
-#   bedrock:
-#     endpoint: https://bedrock-runtime.us-east-1.amazonaws.com/model/...
-#     api_key_env: BEDROCK_API_KEY
+#   bedrock-sso:
+#     type: bedrock
+#     region: us-east-1
+#     aws_profile: my-sso-profile          # named AWS CLI profile
+#
+#   bedrock-keys:
+#     type: bedrock
+#     region: us-east-1
+#     aws_access_key_id_env: MY_KEY_ID     # explicit credential env vars
+#     aws_secret_access_key_env: MY_SECRET
+#     aws_session_token_env: MY_TOKEN      # optional
 
 # --- LLM-based code quality evaluation ---
 # After each iteration, each evaluator independently reviews every agent's diff
@@ -106,6 +117,10 @@ agents:
 #     provider: vertex
 #     model: google/gemini-2.0-flash-001
 #     api_key_env: CUSTOM_GEMINI_KEY    # model-level override of provider api_key_env
+#
+#   - name: claude-bedrock
+#     provider: bedrock-sso             # requires pip install agenttester[aws]
+#     model: anthropic.claude-3-5-sonnet-20241022-v2:0
 #
 # evaluation:
 #   inject_raw_reports: false   # true → send all raw reports to agents instead of aggregate

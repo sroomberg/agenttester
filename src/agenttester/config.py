@@ -10,6 +10,12 @@ from pathlib import Path
 import yaml
 
 from .presets import PRESETS
+from .providers import (
+    AnthropicProvider,
+    BedrockProvider,
+    OpenAICompatProvider,
+    Provider,
+)
 
 CONFIG_CANDIDATES = [
     "agent-tester.yaml",
@@ -112,23 +118,13 @@ def get_reports_dir(repo_path: Path, config_path: Path | None = None) -> Path:
 
 
 @dataclass
-class ProviderConfig:
-    """Shared endpoint and credentials for a cloud LLM provider."""
-
-    endpoint: str | None = None
-    api_key_env: str | None = None
-
-
-@dataclass
 class EvaluatorConfig:
     """Configuration for a single LLM evaluator."""
 
     name: str
     model: str
-    endpoint: str | None = None
-    api: str | None = None
-    api_key_env: str | None = None
-    provider: str | None = None
+    provider: Provider
+    provider_name: str | None = None
 
 
 @dataclass
@@ -193,6 +189,87 @@ def load_config(config_path: Path | None = None) -> dict[str, AgentConfig]:
     return agents
 
 
+def _build_named_provider(name: str, data: dict) -> Provider:
+    """Instantiate a Provider from a named providers-block entry."""
+    ptype = data.get("type", "openai")
+    if ptype == "anthropic":
+        return AnthropicProvider(
+            api_key_env=data.get("api_key_env", "ANTHROPIC_API_KEY"),
+        )
+    if ptype == "openai":
+        endpoint = data.get("endpoint")
+        if not endpoint:
+            raise ValueError(
+                f"Provider '{name}' with type 'openai' requires an 'endpoint'"
+            )
+        return OpenAICompatProvider(
+            endpoint=endpoint,
+            api_key_env=data.get("api_key_env"),
+        )
+    if ptype == "bedrock":
+        return BedrockProvider(
+            region=data.get("region", "us-east-1"),
+            aws_profile=data.get("aws_profile"),
+            aws_access_key_id_env=data.get("aws_access_key_id_env"),
+            aws_secret_access_key_env=data.get("aws_secret_access_key_env"),
+            aws_session_token_env=data.get("aws_session_token_env"),
+        )
+    raise ValueError(f"Unknown provider type {ptype!r} for provider '{name}'")
+
+
+def _resolve_evaluator_provider(
+    ev: dict,
+    named_providers: dict[str, Provider],
+) -> Provider:
+    """Build the resolved Provider for an evaluator entry.
+
+    Resolution order:
+    - If *provider* names a named provider, use it (with optional model-level
+      overrides of *endpoint* / *api_key_env* for OpenAI-compatible providers,
+      or *api_key_env* for Anthropic providers).
+    - Backward-compat inline forms: ``api: anthropic`` or ``endpoint: ...``.
+    """
+    provider_name = ev.get("provider")
+
+    if provider_name:
+        base = named_providers.get(provider_name)
+        if base is None:
+            raise ValueError(
+                f"Evaluator '{ev['name']}' references unknown provider"
+                f" '{provider_name}'"
+            )
+
+        key_override = ev.get("api_key_env")
+        endpoint_override = ev.get("endpoint")
+
+        if isinstance(base, OpenAICompatProvider) and (
+            key_override or endpoint_override
+        ):
+            return OpenAICompatProvider(
+                endpoint=endpoint_override or base.endpoint,
+                api_key_env=key_override or base.api_key_env,
+            )
+        if isinstance(base, AnthropicProvider) and key_override:
+            return AnthropicProvider(api_key_env=key_override)
+
+        return base
+
+    # Backward-compat: inline evaluator fields
+    if ev.get("api") == "anthropic":
+        return AnthropicProvider(
+            api_key_env=ev.get("api_key_env") or "ANTHROPIC_API_KEY",
+        )
+    if ev.get("endpoint"):
+        return OpenAICompatProvider(
+            endpoint=ev["endpoint"],
+            api_key_env=ev.get("api_key_env"),
+        )
+
+    raise ValueError(
+        f"Evaluator '{ev['name']}' requires 'provider', 'endpoint', or 'api: anthropic'"
+    )
+
+
 def load_evaluators_and_eval_config(
     config_path: Path | None = None,
 ) -> tuple[list[EvaluatorConfig], EvaluationConfig]:
@@ -202,34 +279,24 @@ def load_evaluators_and_eval_config(
     """
     evaluators: list[EvaluatorConfig] = []
     eval_config = EvaluationConfig()
-    providers: dict[str, ProviderConfig] = {}
+    named_providers: dict[str, Provider] = {}
     for path in get_config_paths(config_path):
         data = _load_yaml(path)
         if "providers" in data:
-            providers = {
-                name: ProviderConfig(
-                    endpoint=prov.get("endpoint"),
-                    api_key_env=prov.get("api_key_env"),
-                )
+            named_providers = {
+                name: _build_named_provider(name, prov)
                 for name, prov in (data["providers"] or {}).items()
             }
         if "evaluators" in data:
-            evaluators = []
-            for ev in data["evaluators"] or []:
-                provider_name = ev.get("provider")
-                prov = providers.get(provider_name) if provider_name else None
-                evaluators.append(
-                    EvaluatorConfig(
-                        name=ev["name"],
-                        model=ev["model"],
-                        endpoint=ev.get("endpoint")
-                        or (prov.endpoint if prov else None),
-                        api=ev.get("api"),
-                        api_key_env=ev.get("api_key_env")
-                        or (prov.api_key_env if prov else None),
-                        provider=provider_name,
-                    )
+            evaluators = [
+                EvaluatorConfig(
+                    name=ev["name"],
+                    model=ev["model"],
+                    provider=_resolve_evaluator_provider(ev, named_providers),
+                    provider_name=ev.get("provider"),
                 )
+                for ev in (data["evaluators"] or [])
+            ]
         if "evaluation" in data:
             ec = data["evaluation"] or {}
             eval_config = EvaluationConfig(

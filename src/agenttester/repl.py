@@ -14,7 +14,7 @@ from prompt_toolkit.completion import Completer, Completion
 from rich.console import Console
 from rich.panel import Panel
 
-from .config import ProviderConfig, _load_yaml, get_config_paths
+from .config import _load_yaml, get_config_paths
 from .skills import load_skills
 from .vllm import check_connection
 from .vllm import query as _vllm_query
@@ -53,13 +53,7 @@ class Model:
 
 def _parse_models_from_file(path: Path) -> dict[str, Model]:
     data = _load_yaml(path)
-    providers: dict[str, ProviderConfig] = {
-        name: ProviderConfig(
-            endpoint=prov.get("endpoint"),
-            api_key_env=prov.get("api_key_env"),
-        )
-        for name, prov in (data.get("providers") or {}).items()
-    }
+    providers: dict[str, dict] = data.get("providers") or {}
     result: dict[str, Model] = {}
     for name, agent_data in (data.get("agents") or {}).items():
         m = _COMMAND_PATTERN.search(agent_data.get("command", ""))
@@ -67,7 +61,7 @@ def _parse_models_from_file(path: Path) -> dict[str, Model]:
             provider_name = agent_data.get("provider")
             prov = providers.get(provider_name) if provider_name else None
             api_key_env = agent_data.get("api_key_env") or (
-                prov.api_key_env if prov else None
+                prov.get("api_key_env") if prov else None
             )
             result[name] = Model(
                 name=name,

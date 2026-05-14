@@ -16,6 +16,11 @@ from agenttester.config import (
     load_config,
     load_evaluators_and_eval_config,
 )
+from agenttester.providers import (
+    AnthropicProvider,
+    BedrockProvider,
+    OpenAICompatProvider,
+)
 
 
 class TestAgentConfigProperties:
@@ -350,9 +355,23 @@ class TestLoadEvaluatorsAndEvalConfig:
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
         assert len(evaluators) == 1
-        assert evaluators[0].name == "claude"
-        assert evaluators[0].api == "anthropic"
-        assert evaluators[0].model == "claude-opus-4-7"
+        ev = evaluators[0]
+        assert ev.name == "claude"
+        assert ev.model == "claude-opus-4-7"
+        assert isinstance(ev.provider, AnthropicProvider)
+        assert ev.provider.api_key_env == "ANTHROPIC_API_KEY"
+
+    def test_anthropic_evaluator_custom_api_key_env(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "evaluators:\n"
+            "  - name: claude\n"
+            "    api: anthropic\n"
+            "    api_key_env: MY_KEY\n"
+            "    model: claude-opus-4-7\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        assert evaluators[0].provider.api_key_env == "MY_KEY"
 
     def test_loads_openai_compat_evaluator(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
@@ -363,7 +382,10 @@ class TestLoadEvaluatorsAndEvalConfig:
             "    model: meta-llama/Meta-Llama-3-70B-Instruct\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
-        assert evaluators[0].endpoint == "http://localhost:8004"
+        ev = evaluators[0]
+        assert isinstance(ev.provider, OpenAICompatProvider)
+        assert ev.provider.endpoint == "http://localhost:8004"
+        assert ev.provider.api_key_env is None
 
     def test_loads_multiple_evaluators(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
@@ -392,11 +414,14 @@ class TestLoadEvaluatorsAndEvalConfig:
         assert eval_config.inject_raw_reports is False
         assert eval_config.max_aggregate_tokens == 2000
 
-    def test_evaluator_inherits_provider_endpoint_and_key(self, tmp_path: Path) -> None:
+    def test_evaluator_inherits_openai_provider_endpoint_and_key(
+        self, tmp_path: Path
+    ) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
             "providers:\n"
             "  azure:\n"
+            "    type: openai\n"
             "    endpoint: https://my.openai.azure.com\n"
             "    api_key_env: AZURE_KEY\n"
             "evaluators:\n"
@@ -405,17 +430,20 @@ class TestLoadEvaluatorsAndEvalConfig:
             "    model: gpt-4o\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
-        assert len(evaluators) == 1
         ev = evaluators[0]
-        assert ev.endpoint == "https://my.openai.azure.com"
-        assert ev.api_key_env == "AZURE_KEY"
-        assert ev.provider == "azure"
+        assert isinstance(ev.provider, OpenAICompatProvider)
+        assert ev.provider.endpoint == "https://my.openai.azure.com"
+        assert ev.provider.api_key_env == "AZURE_KEY"
+        assert ev.provider_name == "azure"
 
-    def test_evaluator_model_level_overrides_provider(self, tmp_path: Path) -> None:
+    def test_evaluator_model_level_api_key_overrides_openai_provider(
+        self, tmp_path: Path
+    ) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
             "providers:\n"
             "  vertex:\n"
+            "    type: openai\n"
             "    endpoint: https://vertex.example.com\n"
             "    api_key_env: VERTEX_KEY\n"
             "evaluators:\n"
@@ -426,16 +454,18 @@ class TestLoadEvaluatorsAndEvalConfig:
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
         ev = evaluators[0]
-        assert ev.endpoint == "https://vertex.example.com"
-        assert ev.api_key_env == "CUSTOM_KEY"
+        assert isinstance(ev.provider, OpenAICompatProvider)
+        assert ev.provider.endpoint == "https://vertex.example.com"
+        assert ev.provider.api_key_env == "CUSTOM_KEY"
 
-    def test_evaluator_model_level_endpoint_overrides_provider(
+    def test_evaluator_model_level_endpoint_overrides_openai_provider(
         self, tmp_path: Path
     ) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
             "providers:\n"
             "  azure:\n"
+            "    type: openai\n"
             "    endpoint: https://default.openai.azure.com\n"
             "    api_key_env: AZURE_KEY\n"
             "evaluators:\n"
@@ -445,13 +475,14 @@ class TestLoadEvaluatorsAndEvalConfig:
             "    endpoint: https://custom.openai.azure.com\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
-        assert evaluators[0].endpoint == "https://custom.openai.azure.com"
+        assert evaluators[0].provider.endpoint == "https://custom.openai.azure.com"
 
-    def test_evaluator_without_provider_unaffected(self, tmp_path: Path) -> None:
+    def test_evaluator_without_provider_uses_anthropic(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
             "providers:\n"
             "  azure:\n"
+            "    type: openai\n"
             "    endpoint: https://my.openai.azure.com\n"
             "    api_key_env: AZURE_KEY\n"
             "evaluators:\n"
@@ -461,9 +492,65 @@ class TestLoadEvaluatorsAndEvalConfig:
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
         ev = evaluators[0]
-        assert ev.provider is None
-        assert ev.endpoint is None
-        assert ev.api_key_env is None
+        assert ev.provider_name is None
+        assert isinstance(ev.provider, AnthropicProvider)
+
+    def test_loads_bedrock_provider(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  bedrock:\n"
+            "    type: bedrock\n"
+            "    region: eu-west-1\n"
+            "evaluators:\n"
+            "  - name: claude-bedrock\n"
+            "    provider: bedrock\n"
+            "    model: anthropic.claude-3-5-sonnet-20241022-v2:0\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        ev = evaluators[0]
+        assert isinstance(ev.provider, BedrockProvider)
+        assert ev.provider.region == "eu-west-1"
+
+    def test_bedrock_provider_with_profile(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  bedrock:\n"
+            "    type: bedrock\n"
+            "    aws_profile: my-sso-profile\n"
+            "evaluators:\n"
+            "  - name: claude-bedrock\n"
+            "    provider: bedrock\n"
+            "    model: anthropic.claude-3-5-sonnet-20241022-v2:0\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        prov = evaluators[0].provider
+        assert isinstance(prov, BedrockProvider)
+        assert prov.aws_profile == "my-sso-profile"
+        assert prov.aws_access_key_id_env is None
+
+    def test_bedrock_provider_with_explicit_key_envs(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  bedrock:\n"
+            "    type: bedrock\n"
+            "    aws_access_key_id_env: MY_KEY_ID\n"
+            "    aws_secret_access_key_env: MY_SECRET\n"
+            "    aws_session_token_env: MY_TOKEN\n"
+            "evaluators:\n"
+            "  - name: claude-bedrock\n"
+            "    provider: bedrock\n"
+            "    model: anthropic.claude-3-5-sonnet-20241022-v2:0\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        prov = evaluators[0].provider
+        assert isinstance(prov, BedrockProvider)
+        assert prov.aws_access_key_id_env == "MY_KEY_ID"
+        assert prov.aws_secret_access_key_env == "MY_SECRET"
+        assert prov.aws_session_token_env == "MY_TOKEN"
+        assert prov.aws_profile is None
 
 
 class TestGetReportsDir:

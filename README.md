@@ -152,15 +152,27 @@ evaluation:
 
 ### Cloud providers (Azure, Bedrock, Vertex)
 
-Define a `providers` block to share an endpoint and API key across multiple evaluators or REPL model agents. Model-level fields override the provider defaults.
+Define a `providers` block to share credentials across multiple evaluators or REPL model agents. Each provider entry requires a `type` field. Model-level fields override the provider defaults.
+
+**Provider types**
+
+| `type` | Description | Install |
+|--------|-------------|---------|
+| `openai` | Any OpenAI-compatible endpoint (Azure AI Foundry, GCP Vertex, vLLM, etc.) | built-in |
+| `anthropic` | Direct Anthropic Messages API | built-in |
+| `bedrock` | AWS Bedrock Converse API via boto3 | `pip install agenttester[aws]` |
+
+**OpenAI-compatible providers** (Azure, Vertex, etc.)
 
 ```yaml
 providers:
   azure:
+    type: openai
     endpoint: https://my-resource.openai.azure.com
     api_key_env: AZURE_OPENAI_KEY     # env var holding the API key
 
   vertex:
+    type: openai
     endpoint: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/endpoints/openapi
     api_key_env: VERTEX_AI_KEY
 
@@ -172,10 +184,41 @@ evaluators:
   - name: gemini
     provider: vertex
     model: google/gemini-2.0-flash-001
-    api_key_env: CUSTOM_KEY   # overrides the provider's api_key_env
+    api_key_env: CUSTOM_KEY   # model-level override of api_key_env
 ```
 
-REPL model agents follow the same pattern — `provider` and `api_key_env` fields on an agent entry are picked up when the command matches the `agent-tester query` pattern:
+**AWS Bedrock**
+
+Requires `pip install agenttester[aws]`. Three auth modes are supported; the first configured wins:
+
+```yaml
+providers:
+  # 1. Named AWS CLI profile (SSO, assumed roles, etc.)
+  bedrock-sso:
+    type: bedrock
+    region: us-east-1
+    aws_profile: my-sso-profile
+
+  # 2. Explicit credentials from environment variables
+  bedrock-keys:
+    type: bedrock
+    region: us-east-1
+    aws_access_key_id_env: MY_AWS_KEY_ID
+    aws_secret_access_key_env: MY_AWS_SECRET
+    aws_session_token_env: MY_AWS_TOKEN   # optional
+
+  # 3. Default boto3 credential chain (env vars, ~/.aws/credentials, IAM role)
+  bedrock-default:
+    type: bedrock
+    region: us-east-1
+
+evaluators:
+  - name: claude-bedrock
+    provider: bedrock-sso
+    model: anthropic.claude-3-5-sonnet-20241022-v2:0
+```
+
+REPL model agents support `provider` and `api_key_env` for OpenAI-compatible endpoints:
 
 ```yaml
 agents:
@@ -183,8 +226,6 @@ agents:
     command: 'agent-tester query https://my-resource.openai.azure.com gpt-4o {prompt}'
     provider: azure           # inherits api_key_env from azure provider
 ```
-
-When `api_key_env` is set (directly or via a provider), the resolved key is sent as an `Authorization: Bearer` header on every request.
 
 After each iteration, each evaluator independently critiques every agent's diff for:
 - **Accuracy** — does the code implement what was asked?

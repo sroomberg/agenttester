@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import os
 import time
-import urllib.request
 from dataclasses import dataclass
 
 from .config import EvaluatorConfig
@@ -65,64 +62,12 @@ class EvaluatorResult:
     duration: float
 
 
-def _call_anthropic(
-    evaluator: EvaluatorConfig,
-    messages: list[dict],
-    max_tokens: int,
-) -> str:
-    api_key_env = evaluator.api_key_env or "ANTHROPIC_API_KEY"
-    api_key = os.environ.get(api_key_env, "")
-    payload = json.dumps(
-        {"model": evaluator.model, "max_tokens": max_tokens, "messages": messages}
-    ).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read())
-    return data["content"][0]["text"]
-
-
-def _call_openai_compat(
-    evaluator: EvaluatorConfig,
-    messages: list[dict],
-    max_tokens: int,
-) -> str:
-    api_key = os.environ.get(evaluator.api_key_env, "") if evaluator.api_key_env else ""
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    payload = json.dumps(
-        {"model": evaluator.model, "messages": messages, "max_tokens": max_tokens}
-    ).encode()
-    req = urllib.request.Request(
-        f"{evaluator.endpoint.rstrip('/')}/v1/chat/completions",
-        data=payload,
-        headers=headers,
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read())
-    return data["choices"][0]["message"]["content"]
-
-
 def _call_llm(
     evaluator: EvaluatorConfig,
     messages: list[dict],
     max_tokens: int = 2048,
 ) -> str:
-    if evaluator.api == "anthropic":
-        return _call_anthropic(evaluator, messages, max_tokens)
-    if evaluator.endpoint:
-        return _call_openai_compat(evaluator, messages, max_tokens)
-    raise ValueError(
-        f"Evaluator '{evaluator.name}' requires 'endpoint' or 'api: anthropic'"
-    )
+    return evaluator.provider.call(evaluator.model, messages, max_tokens)
 
 
 def evaluate_diff(
