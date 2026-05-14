@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.11.3 — 2026-05-14
+- **Cost package refactor**: `cost.py` split into `cost/` package (`base.py` — `CostEntry` + `CostBackend` ABC, `local.py` — `LocalCostBackend`, `tracker.py` — `CostTracker`); all existing imports unchanged
+
 ## v0.11.2 — 2026-05-14
 - **Branch name sanitization**: all agent and run names are sanitized to valid git ref components before branch/worktree creation, preventing collisions from spaces, slashes, or other special characters
 - **git.md skill update**: documents the `agenttester/<model-name>/<session-name>` branch format and instructs models not to create new branches
