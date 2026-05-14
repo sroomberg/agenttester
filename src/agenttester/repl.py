@@ -11,6 +11,7 @@ from pathlib import Path
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
@@ -264,6 +265,10 @@ async def run_repl(config_path: Path | None = None, skip_checks: bool = False) -
         console.print()
         for name, reply in responses.items():
             console.print(
-                Panel(reply, title=f"[bold]{name}[/bold]", border_style="blue")
+                Panel(
+                    Markdown(reply),
+                    title=f"[bold]{name}[/bold]",
+                    border_style="blue",
+                )
             )
         console.print()

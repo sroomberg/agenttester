@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.10.1 — 2026-05-14
+- Render REPL model responses as markdown so code blocks are syntax-highlighted and ``` fences are not shown as literal text
+
 ## v0.10.0 — 2026-05-14
 - **Bedrock models in the REPL**: add a `models:` config section that lets you define REPL models using any named provider — including AWS Bedrock — by referencing a provider defined in the `providers:` block; inline `endpoint:` still works for OpenAI-compatible models without a named provider
 - Provider instances are now built lazily per-reference, so legacy configs with provider entries that only specify `api_key_env` (no `endpoint`) continue to work in the backward-compat agent-command path
