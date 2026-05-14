@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.0 — 2026-05-13
+- **Provider-level credentials**: add a `providers` block to define shared endpoint and API key env vars for cloud LLM providers (AWS Bedrock, Azure AI Foundry, GCP Vertex, etc.); evaluators and REPL model agents can reference a provider by name and inherit its credentials
+- **Model-level API key override**: model-level `api_key_env` and `endpoint` fields always take precedence over the provider-level defaults
+- **OpenAI-compatible auth**: `Authorization: Bearer` header is now sent automatically when `api_key_env` is set on an evaluator or REPL model agent, enabling any authenticated OpenAI-compatible endpoint
+
 ## v0.7.0 — 2026-05-13
 - **REPL `@`-autocomplete**: typing `@` in the REPL now autocompletes model names as you type; `@modelname message` routes a message to a single model instead of broadcasting to all
 - **Skills injected into REPL context**: skill instructions are loaded at REPL startup and seeded as a system message for each model; `/reset` restores to this seeded state rather than fully empty history

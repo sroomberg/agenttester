@@ -112,6 +112,14 @@ def get_reports_dir(repo_path: Path, config_path: Path | None = None) -> Path:
 
 
 @dataclass
+class ProviderConfig:
+    """Shared endpoint and credentials for a cloud LLM provider."""
+
+    endpoint: str | None = None
+    api_key_env: str | None = None
+
+
+@dataclass
 class EvaluatorConfig:
     """Configuration for a single LLM evaluator."""
 
@@ -120,6 +128,7 @@ class EvaluatorConfig:
     endpoint: str | None = None
     api: str | None = None
     api_key_env: str | None = None
+    provider: str | None = None
 
 
 @dataclass
@@ -193,19 +202,34 @@ def load_evaluators_and_eval_config(
     """
     evaluators: list[EvaluatorConfig] = []
     eval_config = EvaluationConfig()
+    providers: dict[str, ProviderConfig] = {}
     for path in get_config_paths(config_path):
         data = _load_yaml(path)
-        if "evaluators" in data:
-            evaluators = [
-                EvaluatorConfig(
-                    name=ev["name"],
-                    model=ev["model"],
-                    endpoint=ev.get("endpoint"),
-                    api=ev.get("api"),
-                    api_key_env=ev.get("api_key_env"),
+        if "providers" in data:
+            providers = {
+                name: ProviderConfig(
+                    endpoint=prov.get("endpoint"),
+                    api_key_env=prov.get("api_key_env"),
                 )
-                for ev in (data["evaluators"] or [])
-            ]
+                for name, prov in (data["providers"] or {}).items()
+            }
+        if "evaluators" in data:
+            evaluators = []
+            for ev in data["evaluators"] or []:
+                provider_name = ev.get("provider")
+                prov = providers.get(provider_name) if provider_name else None
+                evaluators.append(
+                    EvaluatorConfig(
+                        name=ev["name"],
+                        model=ev["model"],
+                        endpoint=ev.get("endpoint")
+                        or (prov.endpoint if prov else None),
+                        api=ev.get("api"),
+                        api_key_env=ev.get("api_key_env")
+                        or (prov.api_key_env if prov else None),
+                        provider=provider_name,
+                    )
+                )
         if "evaluation" in data:
             ec = data["evaluation"] or {}
             eval_config = EvaluationConfig(

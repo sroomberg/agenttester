@@ -67,6 +67,23 @@ agents:
   #   commit_style: manual
   #   timeout: 120
 
+# --- Cloud LLM providers (optional) ---
+# Define shared endpoints and credentials here; evaluators and agents can
+# reference a provider by name. Model-level fields override provider-level ones.
+#
+# providers:
+#   azure:
+#     endpoint: https://my-resource.openai.azure.com
+#     api_key_env: AZURE_OPENAI_KEY          # env var holding the API key
+#
+#   vertex:
+#     endpoint: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/endpoints/openapi
+#     api_key_env: VERTEX_AI_KEY
+#
+#   bedrock:
+#     endpoint: https://bedrock-runtime.us-east-1.amazonaws.com/model/...
+#     api_key_env: BEDROCK_API_KEY
+
 # --- LLM-based code quality evaluation ---
 # After each iteration, each evaluator independently reviews every agent's diff
 # and produces a critique. An aggregate report is synthesized from all reviewers.
@@ -80,6 +97,15 @@ agents:
 #   - name: llama3
 #     endpoint: http://localhost:8004   # OpenAI-compatible endpoint (e.g. vllmd)
 #     model: meta-llama/Meta-Llama-3-70B-Instruct
+#
+#   - name: gpt-4o
+#     provider: azure           # inherits endpoint + api_key_env from azure provider
+#     model: gpt-4o
+#
+#   - name: gemini
+#     provider: vertex
+#     model: google/gemini-2.0-flash-001
+#     api_key_env: CUSTOM_GEMINI_KEY    # model-level override of provider api_key_env
 #
 # evaluation:
 #   inject_raw_reports: false   # true → send all raw reports to agents instead of aggregate

@@ -94,13 +94,17 @@ def _call_openai_compat(
     messages: list[dict],
     max_tokens: int,
 ) -> str:
+    api_key = os.environ.get(evaluator.api_key_env, "") if evaluator.api_key_env else ""
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     payload = json.dumps(
         {"model": evaluator.model, "messages": messages, "max_tokens": max_tokens}
     ).encode()
     req = urllib.request.Request(
         f"{evaluator.endpoint.rstrip('/')}/v1/chat/completions",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read())

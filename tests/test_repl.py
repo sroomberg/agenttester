@@ -109,6 +109,67 @@ class TestLoadModels:
         )
         assert load_models(cfg)["llama3"].messages == []
 
+    def test_model_level_api_key_env(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "agent-tester.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "agents": {
+                        "azure-llm": {
+                            "command": _vllm_command("http://h:8001", "gpt-4o"),
+                            "api_key_env": "MY_AZURE_KEY",
+                        }
+                    }
+                }
+            )
+        )
+        m = load_models(cfg)["azure-llm"]
+        assert m.api_key_env == "MY_AZURE_KEY"
+
+    def test_model_inherits_provider_api_key_env(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "agent-tester.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "providers": {"azure": {"api_key_env": "AZURE_KEY"}},
+                    "agents": {
+                        "azure-llm": {
+                            "command": _vllm_command("http://h:8001", "gpt-4o"),
+                            "provider": "azure",
+                        }
+                    },
+                }
+            )
+        )
+        m = load_models(cfg)["azure-llm"]
+        assert m.api_key_env == "AZURE_KEY"
+
+    def test_model_level_api_key_env_overrides_provider(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "agent-tester.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "providers": {"azure": {"api_key_env": "PROVIDER_KEY"}},
+                    "agents": {
+                        "azure-llm": {
+                            "command": _vllm_command("http://h:8001", "gpt-4o"),
+                            "provider": "azure",
+                            "api_key_env": "MODEL_KEY",
+                        }
+                    },
+                }
+            )
+        )
+        m = load_models(cfg)["azure-llm"]
+        assert m.api_key_env == "MODEL_KEY"
+
+    def test_model_without_api_key_env_defaults_to_none(self, tmp_path: Path) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
+        )
+        assert load_models(cfg)["llama3"].api_key_env is None
+
     def test_merges_global_and_local_configs(self, tmp_path: Path) -> None:
         global_cfg = tmp_path / "global.yml"
         global_cfg.write_text(
@@ -201,7 +262,7 @@ class TestQuerySync:
         )
         captured = {}
 
-        def capturing_query(endpoint, model_id, messages, max_tokens=2048):
+        def capturing_query(endpoint, model_id, messages, max_tokens=2048, **kwargs):
             captured["messages"] = list(messages)
             return "resp 2"
 
@@ -232,6 +293,38 @@ class TestQuerySync:
             result = _query_sync(model, "hi")
         assert model.messages == []
         assert "[error]" in result
+
+    def test_passes_api_key_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MY_KEY", "secret-token")
+        model = Model(
+            name="m",
+            endpoint="http://host:8001",
+            model_id="llama",
+            api_key_env="MY_KEY",
+        )
+        captured = {}
+
+        def capturing_query(endpoint, model_id, messages, max_tokens=2048, **kwargs):
+            captured["api_key"] = kwargs.get("api_key")
+            return "ok"
+
+        with patch("agenttester.repl._vllm_query", side_effect=capturing_query):
+            _query_sync(model, "hi")
+
+        assert captured["api_key"] == "secret-token"
+
+    def test_passes_none_api_key_when_not_configured(self) -> None:
+        model = Model(name="m", endpoint="http://host:8001", model_id="llama")
+        captured = {}
+
+        def capturing_query(endpoint, model_id, messages, max_tokens=2048, **kwargs):
+            captured["api_key"] = kwargs.get("api_key")
+            return "ok"
+
+        with patch("agenttester.repl._vllm_query", side_effect=capturing_query):
+            _query_sync(model, "hi")
+
+        assert captured["api_key"] is None
 
 
 # ---------------------------------------------------------------------------

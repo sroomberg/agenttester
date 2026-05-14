@@ -27,6 +27,7 @@ def query(
     messages: list[dict],
     max_tokens: int = 2048,
     timeout: int = 120,
+    api_key: str | None = None,
 ) -> str:
     """Send a chat completion request and return the response text.
 
@@ -39,10 +40,13 @@ def query(
             "max_tokens": max_tokens,
         }
     ).encode()
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     req = urllib.request.Request(
         f"{endpoint.rstrip('/')}/v1/chat/completions",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read())

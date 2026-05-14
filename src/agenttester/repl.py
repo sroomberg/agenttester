@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import urllib.error
 from dataclasses import dataclass, field
@@ -13,7 +14,7 @@ from prompt_toolkit.completion import Completer, Completion
 from rich.console import Console
 from rich.panel import Panel
 
-from .config import _load_yaml, get_config_paths
+from .config import ProviderConfig, _load_yaml, get_config_paths
 from .skills import load_skills
 from .vllm import check_connection
 from .vllm import query as _vllm_query
@@ -46,16 +47,34 @@ class Model:
     name: str
     endpoint: str
     model_id: str
+    api_key_env: str | None = None
     messages: list[dict] = field(default_factory=list)
 
 
 def _parse_models_from_file(path: Path) -> dict[str, Model]:
     data = _load_yaml(path)
+    providers: dict[str, ProviderConfig] = {
+        name: ProviderConfig(
+            endpoint=prov.get("endpoint"),
+            api_key_env=prov.get("api_key_env"),
+        )
+        for name, prov in (data.get("providers") or {}).items()
+    }
     result: dict[str, Model] = {}
     for name, agent_data in (data.get("agents") or {}).items():
         m = _COMMAND_PATTERN.search(agent_data.get("command", ""))
         if m:
-            result[name] = Model(name=name, endpoint=m.group(1), model_id=m.group(2))
+            provider_name = agent_data.get("provider")
+            prov = providers.get(provider_name) if provider_name else None
+            api_key_env = agent_data.get("api_key_env") or (
+                prov.api_key_env if prov else None
+            )
+            result[name] = Model(
+                name=name,
+                endpoint=m.group(1),
+                model_id=m.group(2),
+                api_key_env=api_key_env,
+            )
     return result
 
 
@@ -69,8 +88,11 @@ def load_models(config_path: Path | None = None) -> dict[str, Model]:
 
 def _query_sync(model: Model, prompt: str, max_tokens: int = 2048) -> str:
     model.messages.append({"role": "user", "content": prompt})
+    api_key = os.environ.get(model.api_key_env) if model.api_key_env else None
     try:
-        reply = _vllm_query(model.endpoint, model.model_id, model.messages, max_tokens)
+        reply = _vllm_query(
+            model.endpoint, model.model_id, model.messages, max_tokens, api_key=api_key
+        )
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         model.messages.pop()

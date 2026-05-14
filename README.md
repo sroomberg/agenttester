@@ -150,6 +150,42 @@ evaluation:
   max_aggregate_tokens: 2000  # aggregate is summarized before injection if too long
 ```
 
+### Cloud providers (Azure, Bedrock, Vertex)
+
+Define a `providers` block to share an endpoint and API key across multiple evaluators or REPL model agents. Model-level fields override the provider defaults.
+
+```yaml
+providers:
+  azure:
+    endpoint: https://my-resource.openai.azure.com
+    api_key_env: AZURE_OPENAI_KEY     # env var holding the API key
+
+  vertex:
+    endpoint: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/endpoints/openapi
+    api_key_env: VERTEX_AI_KEY
+
+evaluators:
+  - name: gpt-4o
+    provider: azure           # inherits endpoint + api_key_env
+    model: gpt-4o
+
+  - name: gemini
+    provider: vertex
+    model: google/gemini-2.0-flash-001
+    api_key_env: CUSTOM_KEY   # overrides the provider's api_key_env
+```
+
+REPL model agents follow the same pattern — `provider` and `api_key_env` fields on an agent entry are picked up when the command matches the `agent-tester query` pattern:
+
+```yaml
+agents:
+  azure-llm:
+    command: 'agent-tester query https://my-resource.openai.azure.com gpt-4o {prompt}'
+    provider: azure           # inherits api_key_env from azure provider
+```
+
+When `api_key_env` is set (directly or via a provider), the resolved key is sent as an `Authorization: Bearer` header on every request.
+
 After each iteration, each evaluator independently critiques every agent's diff for:
 - **Accuracy** — does the code implement what was asked?
 - **Readability** — is it clear and well-named?

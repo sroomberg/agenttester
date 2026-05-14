@@ -87,3 +87,27 @@ class TestQuery:
             query("http://host:8001", "llama", [], max_tokens=512)
 
         assert captured["payload"]["max_tokens"] == 512
+
+    def test_sends_bearer_auth_when_api_key_provided(self) -> None:
+        captured = {}
+
+        def capturing_urlopen(req, timeout=None):
+            captured["headers"] = dict(req.headers)
+            return _mock_urlopen("ok")
+
+        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+            query("http://host:8001", "llama", [], api_key="secret-key")
+
+        assert captured["headers"].get("Authorization") == "Bearer secret-key"
+
+    def test_no_auth_header_when_api_key_omitted(self) -> None:
+        captured = {}
+
+        def capturing_urlopen(req, timeout=None):
+            captured["headers"] = dict(req.headers)
+            return _mock_urlopen("ok")
+
+        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+            query("http://host:8001", "llama", [])
+
+        assert "Authorization" not in captured["headers"]

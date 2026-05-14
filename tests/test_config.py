@@ -392,6 +392,79 @@ class TestLoadEvaluatorsAndEvalConfig:
         assert eval_config.inject_raw_reports is False
         assert eval_config.max_aggregate_tokens == 2000
 
+    def test_evaluator_inherits_provider_endpoint_and_key(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  azure:\n"
+            "    endpoint: https://my.openai.azure.com\n"
+            "    api_key_env: AZURE_KEY\n"
+            "evaluators:\n"
+            "  - name: gpt4o\n"
+            "    provider: azure\n"
+            "    model: gpt-4o\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        assert len(evaluators) == 1
+        ev = evaluators[0]
+        assert ev.endpoint == "https://my.openai.azure.com"
+        assert ev.api_key_env == "AZURE_KEY"
+        assert ev.provider == "azure"
+
+    def test_evaluator_model_level_overrides_provider(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  vertex:\n"
+            "    endpoint: https://vertex.example.com\n"
+            "    api_key_env: VERTEX_KEY\n"
+            "evaluators:\n"
+            "  - name: gemini\n"
+            "    provider: vertex\n"
+            "    model: google/gemini-2.0-flash\n"
+            "    api_key_env: CUSTOM_KEY\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        ev = evaluators[0]
+        assert ev.endpoint == "https://vertex.example.com"
+        assert ev.api_key_env == "CUSTOM_KEY"
+
+    def test_evaluator_model_level_endpoint_overrides_provider(
+        self, tmp_path: Path
+    ) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  azure:\n"
+            "    endpoint: https://default.openai.azure.com\n"
+            "    api_key_env: AZURE_KEY\n"
+            "evaluators:\n"
+            "  - name: gpt4o\n"
+            "    provider: azure\n"
+            "    model: gpt-4o\n"
+            "    endpoint: https://custom.openai.azure.com\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        assert evaluators[0].endpoint == "https://custom.openai.azure.com"
+
+    def test_evaluator_without_provider_unaffected(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  azure:\n"
+            "    endpoint: https://my.openai.azure.com\n"
+            "    api_key_env: AZURE_KEY\n"
+            "evaluators:\n"
+            "  - name: claude\n"
+            "    api: anthropic\n"
+            "    model: claude-opus-4-7\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        ev = evaluators[0]
+        assert ev.provider is None
+        assert ev.endpoint is None
+        assert ev.api_key_env is None
+
 
 class TestGetReportsDir:
     def test_default_is_global_config_dir(self, tmp_path: Path) -> None:
