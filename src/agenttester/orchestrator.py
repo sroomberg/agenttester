@@ -216,6 +216,9 @@ class Orchestrator:
         keep_worktrees: bool = False,
         evaluators: list[EvaluatorConfig] | None = None,
         eval_config: EvaluationConfig | None = None,
+        push: bool = False,
+        remote: str = "origin",
+        pem_path: str | None = None,
     ) -> list[AgentResult]:
         """Execute a prompt across all agents and produce comparison reports.
 
@@ -406,6 +409,20 @@ class Orchestrator:
                     agent_feedback[agent.name] = feedback
 
         finally:
+            if push and worktrees:
+                self.console.print("\n[bold]Pushing branches to remote…[/bold]")
+                for agent_name in worktrees:
+                    try:
+                        self.git.push_branch(
+                            agent_name, run_name, remote=remote, pem_path=pem_path
+                        )
+                        self.console.print(
+                            f"  [green]✓[/green] {agent_name} →"
+                            f" {remote}/agenttester/{agent_name}/{run_name}"
+                        )
+                    except Exception as e:
+                        self.console.print(f"  [red]✗[/red] {agent_name}: {e}")
+
             if keep_worktrees:
                 self.console.print("[dim]Worktrees kept for inspection.[/dim]")
             else:

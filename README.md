@@ -265,13 +265,43 @@ For comparing responses from vLLM model servers interactively, with persistent
 conversation history within a session:
 
 ```bash
-agent-tester repl                        # auto-discovers agent-tester.yaml, falls back to global config
-agent-tester repl --config custom.yaml   # explicit config path
+agent-tester repl                         # auto-discovers agent-tester.yaml
+agent-tester repl --config custom.yaml    # explicit config path
+agent-tester repl --session my-session    # save/restore conversation history
+agent-tester repl --workdir /path/to/repo # enable tool use with a target repo
 ```
 
 The REPL fans out each prompt to all configured models in parallel and maintains separate
 conversation history per model. Use `/reset` to clear history, `@modelname message` to
 address a single model, or `exit` to quit. Tab-completes model names after `@`.
+
+### Sessions
+
+Pass `--session <name>` to persist conversation history across REPL invocations. On exit,
+each model's history is saved to `~/.config/agenttester/sessions/<name>.json`. The next
+time you run `repl --session <name>`, history is restored and the conversation continues
+where it left off.
+
+### Tool use and branches
+
+Pass `--workdir <dir>` to enable an agent loop for OpenAI-compatible models. Each model
+gains access to `bash`, `read_file`, `write_file`, `git_clone`, `git_commit`, and
+`git_push` tools. When `--workdir` is a git repo, each model automatically works in its
+own worktree on a dedicated branch:
+
+```
+agenttester/<model-name>/<session-name>
+```
+
+Use `--pem <path>` to authenticate git operations over SSH. Combine flags for a full
+multi-model coding workflow:
+
+```bash
+agent-tester repl \
+  --session sprint-42 \
+  --workdir ~/dev/my-project \
+  --pem ~/.ssh/deploy_key
+```
 
 Config resolution follows the same priority as `run`: global config first, then local
 (or explicit) config, with local taking precedence on conflicts.

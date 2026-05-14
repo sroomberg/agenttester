@@ -57,6 +57,72 @@ class TestCommitAll:
         assert not gm.commit_all(wt, "testagent")
 
 
+class TestGetOrCreateWorktree:
+    def test_creates_new_branch_and_worktree(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        wt = gm.get_or_create_worktree("agent1", "sess1")
+        assert wt.exists()
+        repo = git.Repo(tmp_git_repo)
+        branch_names = [b.name for b in repo.branches]
+        assert "agenttester/agent1/sess1" in branch_names
+
+    def test_returns_existing_path_without_recreating(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        wt1 = gm.get_or_create_worktree("agent1", "sess2")
+        (wt1 / "file.txt").write_text("data")
+        wt2 = gm.get_or_create_worktree("agent1", "sess2")
+        assert wt1 == wt2
+        assert (wt2 / "file.txt").exists()
+
+    def test_reattaches_to_existing_branch_after_cleanup(
+        self, tmp_git_repo: Path
+    ) -> None:
+        gm = GitManager(tmp_git_repo)
+        wt = gm.get_or_create_worktree("agent1", "sess3")
+        (wt / "change.txt").write_text("hello")
+        gm.commit_all(wt, "agent1")
+        gm.cleanup_worktree("sess3", "agent1")
+        assert not wt.exists()
+        # Branch still exists — reattach
+        wt2 = gm.get_or_create_worktree("agent1", "sess3")
+        assert wt2.exists()
+
+
+class TestPushBranch:
+    def test_calls_git_push_with_correct_branch(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        gm.create_worktree("myagent", "run99")
+        mock_git = MagicMock()
+        gm.repo.git = mock_git
+        gm.push_branch("myagent", "run99")
+        mock_git.push.assert_called_once_with("origin", "agenttester/myagent/run99")
+
+    def test_custom_remote(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        gm.create_worktree("a", "r")
+        mock_git = MagicMock()
+        gm.repo.git = mock_git
+        gm.push_branch("a", "r", remote="upstream")
+        mock_git.push.assert_called_once_with("upstream", "agenttester/a/r")
+
+    def test_sets_ssh_command_when_pem_given(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        gm.create_worktree("a", "r2")
+        mock_git = MagicMock()
+        gm.repo.git = mock_git
+        gm.push_branch("a", "r2", pem_path="/my.pem")
+        call_kwargs = mock_git.update_environment.call_args[1]
+        assert "/my.pem" in call_kwargs["GIT_SSH_COMMAND"]
+
+    def test_no_update_environment_without_pem(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        gm.create_worktree("a", "r3")
+        mock_git = MagicMock()
+        gm.repo.git = mock_git
+        gm.push_branch("a", "r3")
+        mock_git.update_environment.assert_not_called()
+
+
 class TestGetDiffStats:
     def test_stats_after_changes(self, tmp_git_repo: Path) -> None:
         gm = GitManager(tmp_git_repo)

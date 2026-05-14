@@ -72,6 +72,47 @@ class GitManager:
         except Exception:
             return False
 
+    def get_or_create_worktree(self, agent_name: str, run_name: str) -> Path:
+        """Return an existing worktree or create a new branch + worktree.
+
+        Used when resuming a named REPL session where the branch and
+        worktree may already exist from a previous invocation.
+        """
+        branch = f"agenttester/{agent_name}/{run_name}"
+        worktree_path = self.worktree_base / run_name / agent_name
+
+        if worktree_path.exists():
+            return worktree_path
+
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.repo.git.rev_parse("--verify", branch)
+            # Branch already exists — attach a new worktree to it.
+            self.repo.git.worktree("add", str(worktree_path), branch)
+        except GitCommandError:
+            # Branch does not exist — create branch and worktree together.
+            self.repo.git.worktree("add", "-b", branch, str(worktree_path))
+        return worktree_path
+
+    def push_branch(
+        self,
+        agent_name: str,
+        run_name: str,
+        remote: str = "origin",
+        pem_path: str | None = None,
+    ) -> None:
+        """Push an agent's branch to a remote repository.
+
+        When *pem_path* is provided it is used as the SSH identity file,
+        overriding any ``GIT_SSH_COMMAND`` already in the environment.
+        """
+        branch = f"agenttester/{agent_name}/{run_name}"
+        if pem_path:
+            self.repo.git.update_environment(
+                GIT_SSH_COMMAND=f"ssh -i {pem_path} -o StrictHostKeyChecking=no"
+            )
+        self.repo.git.push(remote, branch)
+
     def create_worktree(self, agent_name: str, run_name: str) -> Path:
         """Create a worktree with a new branch for an agent run."""
         branch = f"agenttester/{agent_name}/{run_name}"

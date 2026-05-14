@@ -20,6 +20,8 @@ from agenttester.repl import (
     load_models,
     run_repl,
 )
+from agenttester.session import ReplSession
+from agenttester.tools import ToolExecutor
 
 _PATCH_GLOBAL = "agenttester.config._get_global_config_candidates"
 
@@ -367,6 +369,43 @@ class TestQuerySync:
         assert model.messages == []
         assert "[error]" in result
 
+    def test_tool_executor_triggers_agent_loop(self) -> None:
+        provider = MagicMock(spec=OpenAICompatProvider)
+        executor = MagicMock(spec=ToolExecutor)
+        model = Model(
+            name="m", model_id="llama", provider=provider, tool_executor=executor
+        )
+        with patch(
+            "agenttester.repl.run_agent_loop", return_value="loop reply"
+        ) as mock_loop:
+            result = _query_sync(model, "do it")
+        mock_loop.assert_called_once()
+        assert result == "loop reply"
+
+    def test_tool_executor_error_restores_messages(self) -> None:
+        provider = MagicMock(spec=OpenAICompatProvider)
+        executor = MagicMock(spec=ToolExecutor)
+        model = Model(
+            name="m",
+            model_id="llama",
+            provider=provider,
+            tool_executor=executor,
+            messages=[{"role": "system", "content": "seed"}],
+        )
+        with patch("agenttester.repl.run_agent_loop", side_effect=RuntimeError("boom")):
+            result = _query_sync(model, "do it")
+        assert model.messages == [{"role": "system", "content": "seed"}]
+        assert "[error]" in result
+
+    def test_no_tool_executor_uses_provider_call(self) -> None:
+        provider = MagicMock(spec=OpenAICompatProvider)
+        provider.call.return_value = "plain reply"
+        model = Model(name="m", model_id="llama", provider=provider)
+        with patch("agenttester.repl.run_agent_loop") as mock_loop:
+            result = _query_sync(model, "hi")
+        mock_loop.assert_not_called()
+        assert result == "plain reply"
+
 
 # ---------------------------------------------------------------------------
 # _query_all
@@ -542,3 +581,75 @@ class TestRunReplSkillSeeding:
 
         assert len(snapshots) == 1
         assert snapshots[0][0] == {"role": "system", "content": "skill context"}
+
+
+# ---------------------------------------------------------------------------
+# run_repl — session persistence
+# ---------------------------------------------------------------------------
+
+
+class TestRunReplSession:
+    async def test_session_saved_on_exit(self, tmp_path: Path) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
+        )
+        sessions_dir = tmp_path / "sessions"
+        inputs = iter(["exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=sessions_dir,
+            ),
+        ):
+            mock_session_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg, session_name="my-session")
+
+        assert (sessions_dir / "my-session.json").exists()
+
+    async def test_session_history_restored_on_resume(self, tmp_path: Path) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
+        )
+        sessions_dir = tmp_path / "sessions"
+        saved = ReplSession.create("resume-test")
+        saved.histories["m"] = [
+            {"role": "user", "content": "prev question"},
+            {"role": "assistant", "content": "prev answer"},
+        ]
+        saved.save(sessions_dir)
+
+        captured: list[list[dict]] = []
+        inputs = iter(["hello", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        async def capture_query(models, prompt):
+            captured.append(list(next(iter(models.values())).messages))
+            return {"m": "ok"}
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch("agenttester.repl._query_all", side_effect=capture_query),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=sessions_dir,
+            ),
+        ):
+            mock_session_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg, session_name="resume-test")
+
+        # First query should see the restored conversation history
+        assert captured[0][0] == {"role": "user", "content": "prev question"}
+        assert captured[0][1] == {"role": "assistant", "content": "prev answer"}

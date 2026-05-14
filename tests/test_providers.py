@@ -166,6 +166,58 @@ class TestOpenAICompatProvider:
 
         assert captured["url"] == "http://host:8001/v1/chat/completions"
 
+    def test_call_raw_returns_message_dict(self) -> None:
+        msg = {"content": "hi", "tool_calls": None}
+        body = {"choices": [{"message": msg}]}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            result = OpenAICompatProvider("http://host:8001").call_raw("llama", [], 100)
+        assert result == msg
+
+    def test_call_raw_includes_tools_in_payload(self) -> None:
+        captured = {}
+        tools = [{"type": "function", "function": {"name": "bash"}}]
+
+        def capturing_urlopen(req, timeout=None):
+            import json
+
+            captured["body"] = json.loads(req.data.decode())
+            return _mock_urlopen({"choices": [{"message": {"content": "ok"}}]})
+
+        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+            OpenAICompatProvider("http://host:8001").call_raw(
+                "llama", [], 100, tools=tools
+            )
+
+        assert "tools" in captured["body"]
+        assert captured["body"]["tools"] == tools
+
+    def test_call_raw_omits_tools_when_none(self) -> None:
+        captured = {}
+
+        def capturing_urlopen(req, timeout=None):
+            import json
+
+            captured["body"] = json.loads(req.data.decode())
+            return _mock_urlopen({"choices": [{"message": {"content": "ok"}}]})
+
+        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+            OpenAICompatProvider("http://host:8001").call_raw("llama", [], 100)
+
+        assert "tools" not in captured["body"]
+
+    def test_call_delegates_to_call_raw(self) -> None:
+        msg = {"content": "from call_raw", "tool_calls": None}
+        body = {"choices": [{"message": msg}]}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            result = OpenAICompatProvider("http://host:8001").call("llama", [], 100)
+        assert result == "from call_raw"
+
+    def test_call_returns_empty_string_for_none_content(self) -> None:
+        body = {"choices": [{"message": {"content": None, "tool_calls": []}}]}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
+            result = OpenAICompatProvider("http://host:8001").call("llama", [], 100)
+        assert result == ""
+
 
 # ---------------------------------------------------------------------------
 # BedrockProvider

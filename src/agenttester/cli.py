@@ -103,6 +103,18 @@ def run(
         Path | None,
         typer.Option("--repo", "-r", help="Path to target git repo (default: cwd)"),
     ] = None,
+    push: Annotated[
+        bool,
+        typer.Option("--push", help="Push agent branches to remote after the run"),
+    ] = False,
+    remote: Annotated[
+        str,
+        typer.Option("--remote", help="Git remote to push to"),
+    ] = "origin",
+    pem: Annotated[
+        str | None,
+        typer.Option("--pem", help="SSH PEM key path for git push authentication"),
+    ] = None,
 ) -> None:
     """Run agents in parallel on a prompt and compare results."""
     # Resolve prompt
@@ -154,6 +166,9 @@ def run(
                 keep_worktrees=keep_worktrees,
                 evaluators=evaluators or None,
                 eval_config=eval_config,
+                push=push,
+                remote=remote,
+                pem_path=pem,
             )
         )
     except RuntimeError as e:
@@ -197,9 +212,44 @@ def repl(
         bool,
         typer.Option("--skip-checks", "-S", help="Skip endpoint connection checks"),
     ] = False,
+    session: Annotated[
+        str | None,
+        typer.Option(
+            "--session",
+            "-s",
+            help=(
+                "Session name: saves conversation history on exit"
+                " and resumes it on next use"
+            ),
+        ),
+    ] = None,
+    workdir: Annotated[
+        Path | None,
+        typer.Option(
+            "--workdir",
+            "-w",
+            help=(
+                "Enable tool use (bash, file I/O, git) with this directory"
+                " as the working root; if it is a git repo each model gets"
+                " its own branch"
+            ),
+        ),
+    ] = None,
+    pem: Annotated[
+        str | None,
+        typer.Option("--pem", help="SSH PEM key path for git push authentication"),
+    ] = None,
 ) -> None:
-    """Start an interactive REPL across all vLLM model agents."""
-    asyncio.run(run_repl(config, skip_checks=skip_checks))
+    """Start an interactive multi-model REPL."""
+    asyncio.run(
+        run_repl(
+            config,
+            skip_checks=skip_checks,
+            session_name=session,
+            workdir=workdir,
+            pem_path=pem,
+        )
+    )
 
 
 @app.command("agents")

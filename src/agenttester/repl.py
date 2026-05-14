@@ -6,6 +6,7 @@ import asyncio
 import re
 import urllib.error
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -15,8 +16,12 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
+from .git_manager import GitManager
+from .loop import run_agent_loop
 from .providers import BedrockProvider, OpenAICompatProvider, Provider
+from .session import ReplSession
 from .skills import load_skills
+from .tools import ToolExecutor
 from .vllm import check_connection
 
 _COMMAND_PATTERN = re.compile(
@@ -48,6 +53,7 @@ class Model:
     model_id: str
     provider: Provider
     messages: list[dict] = field(default_factory=list)
+    tool_executor: ToolExecutor | None = None
 
 
 def _provider_label(m: Model) -> str:
@@ -123,6 +129,20 @@ def load_models(config_path: Path | None = None) -> dict[str, Model]:
 
 
 def _query_sync(model: Model, prompt: str, max_tokens: int = 2048) -> str:
+    if model.tool_executor and isinstance(model.provider, OpenAICompatProvider):
+        saved = list(model.messages)
+        try:
+            return run_agent_loop(
+                model.provider,
+                model.model_id,
+                model.messages,
+                prompt,
+                model.tool_executor,
+            )
+        except Exception as e:
+            model.messages[:] = saved
+            return f"[error] {e}"
+
     model.messages.append({"role": "user", "content": prompt})
     try:
         reply = model.provider.call(model.model_id, model.messages, max_tokens)
@@ -166,7 +186,36 @@ async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
     return dict(zip(models.keys(), results, strict=True))
 
 
-async def run_repl(config_path: Path | None = None, skip_checks: bool = False) -> None:
+def _setup_worktrees(
+    models: dict[str, Model],
+    git_mgr: GitManager,
+    run_name: str,
+    pem_path: str | None,
+    console: Console,
+) -> None:
+    """Create or reattach a worktree per model and assign a ToolExecutor."""
+    for model in models.values():
+        try:
+            wt_path = git_mgr.get_or_create_worktree(model.name, run_name)
+            model.tool_executor = ToolExecutor(
+                workdir=str(wt_path), pem_path=pem_path
+            )
+            console.print(
+                f"  [dim]branch:[/dim] agenttester/{model.name}/{run_name}"
+            )
+        except Exception as e:
+            console.print(
+                f"  [yellow]Could not create worktree for {model.name}: {e}[/yellow]"
+            )
+
+
+async def run_repl(
+    config_path: Path | None = None,
+    skip_checks: bool = False,
+    session_name: str | None = None,
+    workdir: Path | None = None,
+    pem_path: str | None = None,
+) -> None:
     console = Console()
     models = load_models(config_path)
     if not models:
@@ -206,10 +255,57 @@ async def run_repl(config_path: Path | None = None, skip_checks: bool = False) -
 
         models = live_models
 
+    # Session setup
+    session: ReplSession | None = None
+    if session_name:
+        session, is_new = ReplSession.load_or_create(session_name)
+        if is_new:
+            console.print(f"[dim]New session: {session_name}[/dim]")
+        else:
+            n = sum(len(h) for h in session.histories.values())
+            console.print(
+                f"[dim]Resuming session: {session_name}"
+                f" ({n} message(s) across {len(session.histories)} model(s))[/dim]"
+            )
+
+    # Worktree + tool use setup
+    if workdir:
+        run_name = session_name or datetime.now().strftime("repl-%Y%m%d-%H%M%S")
+        workdir_path = Path(workdir).resolve()
+        try:
+            git_mgr = GitManager(workdir_path)
+            if git_mgr.has_commits():
+                console.print(f"\n[dim]Setting up worktrees in {workdir_path}…[/dim]")
+                _setup_worktrees(models, git_mgr, run_name, pem_path, console)
+            else:
+                console.print(
+                    "[yellow]workdir has no commits; "
+                    "tools enabled but no branches.[/yellow]"
+                )
+                for model in models.values():
+                    model.tool_executor = ToolExecutor(
+                        workdir=str(workdir_path), pem_path=pem_path
+                    )
+        except Exception:
+            console.print(
+                f"[yellow]{workdir} is not a git repo; "
+                "tools enabled, no branches.[/yellow]"
+            )
+            for model in models.values():
+                model.tool_executor = ToolExecutor(
+                    workdir=str(workdir_path), pem_path=pem_path
+                )
+
+    # Skill seeding
     skill_text = load_skills(Path.cwd())
     seed: list[dict] = [{"role": "system", "content": skill_text}] if skill_text else []
-    for model in models.values():
-        model.messages = list(seed)
+
+    # Restore histories or seed fresh
+    for name, model in models.items():
+        if session and name in session.histories and session.histories[name]:
+            model.messages = list(session.histories[name])
+        else:
+            model.messages = list(seed)
 
     if seed:
         console.print("[dim]Skills loaded into context.[/dim]")
@@ -219,56 +315,64 @@ async def run_repl(config_path: Path | None = None, skip_checks: bool = False) -
         "exit or Ctrl-C to quit[/dim]\n"
     )
 
-    session: PromptSession = PromptSession(completer=_ModelCompleter(list(models)))
+    session_obj: PromptSession = PromptSession(completer=_ModelCompleter(list(models)))
 
-    while True:
-        try:
-            raw = await session.prompt_async("> ")
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]bye[/dim]")
-            break
+    try:
+        while True:
+            try:
+                raw = await session_obj.prompt_async("> ")
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]bye[/dim]")
+                break
 
-        raw = raw.strip()
-        if not raw:
-            continue
-        if raw == "exit":
-            break
-        if raw == "/reset":
-            for model in models.values():
-                model.messages = list(seed)
-            console.print("[dim]Context cleared.[/dim]\n")
-            continue
+            raw = raw.strip()
+            if not raw:
+                continue
+            if raw == "exit":
+                break
+            if raw == "/reset":
+                for model in models.values():
+                    model.messages = list(seed)
+                console.print("[dim]Context cleared.[/dim]\n")
+                continue
 
-        # @model routing: "@name rest of message" targets a single model
-        if raw.startswith("@"):
-            parts = raw[1:].split(None, 1)
-            target_name = parts[0] if parts else ""
-            if target_name not in models:
-                known = ", ".join(f"@{n}" for n in models)
+            # @model routing: "@name rest of message" targets a single model
+            if raw.startswith("@"):
+                parts = raw[1:].split(None, 1)
+                target_name = parts[0] if parts else ""
+                if target_name not in models:
+                    known = ", ".join(f"@{n}" for n in models)
+                    console.print(
+                        f"[yellow]Unknown model '{target_name}'. "
+                        f"Known: {known}[/yellow]\n"
+                    )
+                    continue
+                prompt_text = parts[1] if len(parts) > 1 else ""
+                if not prompt_text:
+                    console.print("[yellow]No message after @model.[/yellow]\n")
+                    continue
+                target_models = {target_name: models[target_name]}
+            else:
+                prompt_text = raw
+                target_models = models
+
+            n = len(target_models)
+            label = "model" if n == 1 else "models"
+            with console.status(f"[dim]Querying {n} {label}…[/dim]"):
+                responses = await _query_all(target_models, prompt_text)
+            console.print()
+            for name, reply in responses.items():
                 console.print(
-                    f"[yellow]Unknown model '{target_name}'. Known: {known}[/yellow]\n"
+                    Panel(
+                        Markdown(reply),
+                        title=f"[bold]{name}[/bold]",
+                        border_style="blue",
+                    )
                 )
-                continue
-            prompt_text = parts[1] if len(parts) > 1 else ""
-            if not prompt_text:
-                console.print("[yellow]No message after @model.[/yellow]\n")
-                continue
-            target_models = {target_name: models[target_name]}
-        else:
-            prompt_text = raw
-            target_models = models
-
-        n = len(target_models)
-        label = "model" if n == 1 else "models"
-        with console.status(f"[dim]Querying {n} {label}…[/dim]"):
-            responses = await _query_all(target_models, prompt_text)
-        console.print()
-        for name, reply in responses.items():
-            console.print(
-                Panel(
-                    Markdown(reply),
-                    title=f"[bold]{name}[/bold]",
-                    border_style="blue",
-                )
-            )
-        console.print()
+            console.print()
+    finally:
+        if session:
+            for name, model in models.items():
+                session.histories[name] = list(model.messages)
+            session.save()
+            console.print(f"[dim]Session saved: {session_name}[/dim]")

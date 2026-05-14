@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.0 — 2026-05-14
+- **Tool use in the REPL**: OpenAI-compatible models in the REPL now run a full agent loop with access to `bash`, `read_file`, `write_file`, `git_clone`, `git_commit`, and `git_push` tools; pass `--workdir` to activate tool use with a target directory
+- **Automatic per-model branches**: when `--workdir` points to a git repo each model gets its own worktree on branch `agenttester/<model-name>/<session-name>`; all changes are automatically committed and can be pushed with `--push`
+- **Session persistence**: pass `--session <name>` to save conversation history on exit and restore it on the next `repl` invocation; sessions are stored in `~/.config/agenttester/sessions/`
+- **SSH PEM key support**: `--pem <path>` sets `GIT_SSH_COMMAND` for all git operations (clone, commit push) that need SSH auth
+- **`git_push` and `git_commit` tools** added to `ToolExecutor`; `orchestrator run` now supports `--push`, `--remote`, and `--pem` flags for pushing agent branches after a run
+
 ## v0.10.1 — 2026-05-14
 - Render REPL model responses as markdown so code blocks are syntax-highlighted and ``` fences are not shown as literal text
 
