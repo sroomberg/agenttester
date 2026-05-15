@@ -185,9 +185,7 @@ class Orchestrator:
             diff = self.git.get_diff_text(r.agent_name, run_name, base_ref)
             raw = await asyncio.gather(
                 *[
-                    asyncio.to_thread(
-                        evaluate_diff, ev, diff, original_prompt, r.agent_name
-                    )
+                    evaluate_diff(ev, diff, original_prompt, r.agent_name)
                     for ev in evaluators
                 ],
                 return_exceptions=True,
@@ -201,8 +199,8 @@ class Orchestrator:
                 else:
                     valid.append(res)
             eval_results[r.agent_name] = valid
-            aggregates[r.agent_name] = await asyncio.to_thread(
-                aggregate_evaluations, valid, evaluators[0], r.agent_name
+            aggregates[r.agent_name] = await aggregate_evaluations(
+                valid, evaluators[0], r.agent_name
             )
 
         return eval_results, aggregates
@@ -388,7 +386,7 @@ class Orchestrator:
                     if agent.name in aggregates:
                         feedback = aggregates[agent.name]
                         if not eval_cfg.inject_raw_reports:
-                            feedback = summarize_if_needed(
+                            feedback = await summarize_if_needed(
                                 feedback,
                                 eval_cfg.max_aggregate_tokens,
                                 evaluators[0],
@@ -399,7 +397,7 @@ class Orchestrator:
                             for ev in eval_results_map[agent.name]
                         )
                         if not eval_cfg.inject_raw_reports:
-                            feedback = summarize_if_needed(
+                            feedback = await summarize_if_needed(
                                 feedback,
                                 eval_cfg.max_aggregate_tokens,
                                 evaluators[0],

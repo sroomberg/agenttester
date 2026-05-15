@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import urllib.error
-from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +18,6 @@ from agenttester.repl import (
     Model,
     _ModelCompleter,
     _query_async,
-    _query_sync,
     _run_one,
     load_models,
     run_repl,
@@ -311,78 +308,6 @@ class TestLoadModels:
 
 
 # ---------------------------------------------------------------------------
-# _query_sync
-# ---------------------------------------------------------------------------
-
-
-class TestQuerySync:
-    def _make_model(self, reply: str = "hello") -> tuple[Model, MagicMock]:
-        provider = MagicMock()
-        provider.call.return_value = reply
-        return Model(name="m", model_id="llama", provider=provider), provider
-
-    def test_appends_user_and_assistant_messages(self) -> None:
-        model, _ = self._make_model("hello")
-        _query_sync(model, "hi")
-        assert model.messages == [
-            {"role": "user", "content": "hi"},
-            {"role": "assistant", "content": "hello"},
-        ]
-
-    def test_returns_assistant_content(self) -> None:
-        model, _ = self._make_model("the answer")
-        result = _query_sync(model, "question")
-        assert result == "the answer"
-
-    def test_sends_full_history(self) -> None:
-        provider = MagicMock()
-        provider.call.return_value = "resp 2"
-        model = Model(
-            name="m",
-            model_id="llama",
-            provider=provider,
-            messages=[
-                {"role": "user", "content": "turn 1"},
-                {"role": "assistant", "content": "resp 1"},
-            ],
-        )
-        _query_sync(model, "turn 2")
-        messages_sent = provider.call.call_args.args[1]
-        assert messages_sent[0] == {"role": "user", "content": "turn 1"}
-        assert messages_sent[1] == {"role": "assistant", "content": "resp 1"}
-        assert messages_sent[2] == {"role": "user", "content": "turn 2"}
-
-    def test_http_error_does_not_corrupt_history(self) -> None:
-        provider = MagicMock()
-        provider.call.side_effect = urllib.error.HTTPError(
-            url="http://host:8001",
-            code=500,
-            msg="Internal Server Error",
-            hdrs=None,  # type: ignore[arg-type]
-            fp=BytesIO(b"server error"),
-        )
-        model = Model(name="m", model_id="llama", provider=provider)
-        result = _query_sync(model, "hi")
-        assert model.messages == []
-        assert "[error]" in result
-
-    def test_connection_error_does_not_corrupt_history(self) -> None:
-        provider = MagicMock()
-        provider.call.side_effect = OSError("refused")
-        model = Model(name="m", model_id="llama", provider=provider)
-        result = _query_sync(model, "hi")
-        assert model.messages == []
-        assert "[error]" in result
-
-    def test_no_tool_executor_uses_provider_call(self) -> None:
-        provider = MagicMock()
-        provider.call.return_value = "plain reply"
-        model = Model(name="m", model_id="llama", provider=provider)
-        result = _query_sync(model, "hi")
-        assert result == "plain reply"
-
-
-# ---------------------------------------------------------------------------
 # _query_async
 # ---------------------------------------------------------------------------
 
@@ -456,7 +381,7 @@ class TestQueryAsync:
 class TestRunOne:
     async def test_returns_name_and_result(self) -> None:
         provider = MagicMock()
-        provider.call.return_value = "ok"
+        provider.async_call = AsyncMock(return_value="ok")
         model = Model(name="llama3", model_id="llama", provider=provider)
         name, result = await _run_one("llama3", model, "hello")
         assert name == "llama3"
@@ -464,7 +389,7 @@ class TestRunOne:
 
     async def test_returns_error_string_on_exception(self) -> None:
         provider = MagicMock()
-        provider.call.side_effect = OSError("unreachable")
+        provider.async_call = AsyncMock(side_effect=OSError("unreachable"))
         model = Model(name="llama3", model_id="llama", provider=provider)
         name, result = await _run_one("llama3", model, "hello")
         assert name == "llama3"

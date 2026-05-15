@@ -2,52 +2,42 @@
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
+import aiohttp
 
 
-def check_connection(endpoint: str, timeout: int = 5) -> bool:
-    """Return True if the vLLM server at *endpoint* is reachable.
-
-    Uses GET /v1/models — a lightweight, read-only health check that every
-    vLLM server exposes.
-    """
+async def check_connection(endpoint: str, timeout: int = 5) -> bool:
+    """Return True if the vLLM server at *endpoint* is reachable."""
     try:
-        req = urllib.request.Request(f"{endpoint.rstrip('/')}/v1/models")
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
+        _timeout = aiohttp.ClientTimeout(total=timeout)
+        async with (
+            aiohttp.ClientSession(timeout=_timeout) as session,
+            session.get(f"{endpoint.rstrip('/')}/v1/models") as resp,
+        ):
+            return resp.status < 500
     except Exception:
         return False
 
 
-def query(
+async def query(
     endpoint: str,
     model_id: str,
     messages: list[dict],
     max_tokens: int = 2048,
-    timeout: int = 120,
     api_key: str | None = None,
 ) -> str:
-    """Send a chat completion request and return the response text.
-
-    Raises urllib.error.HTTPError or OSError on failure.
-    """
-    payload = json.dumps(
-        {
-            "model": model_id,
-            "messages": messages,
-            "max_tokens": max_tokens,
-        }
-    ).encode()
-    headers: dict[str, str] = {"Content-Type": "application/json"}
+    """Send a chat completion request and return the response text."""
+    headers: dict[str, str] = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(
-        f"{endpoint.rstrip('/')}/v1/chat/completions",
-        data=payload,
-        headers=headers,
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read())
+    body = {"model": model_id, "messages": messages, "max_tokens": max_tokens}
+    _timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=300)
+    async with (
+        aiohttp.ClientSession(timeout=_timeout) as session,
+        session.post(
+            f"{endpoint.rstrip('/')}/v1/chat/completions",
+            json=body,
+            headers=headers,
+        ) as resp,
+    ):
+        data = await resp.json()
     return data["choices"][0]["message"]["content"]

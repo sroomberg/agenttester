@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -14,7 +13,6 @@ from agenttester.providers import (
     BedrockProvider,
     OpenAICompatProvider,
     Provider,
-    _from_anthropic_response,
     _to_anthropic_messages,
     _to_anthropic_tools,
 )
@@ -37,10 +35,20 @@ def _boto3_mock(client_mock: MagicMock):
         yield mock_session_cls
 
 
-def _mock_urlopen(body: dict) -> MagicMock:
-    mock = MagicMock()
-    mock.__enter__.return_value.read.return_value = json.dumps(body).encode()
-    return mock
+def _mock_aiohttp_json(response_json: dict):
+    """Create a mock aiohttp session/response that returns response_json from .json()."""  # noqa: E501
+    mock_resp = MagicMock()
+    mock_resp.json = AsyncMock(return_value=response_json)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = MagicMock()
+    mock_session.post.return_value = mock_resp
+    mock_session.get.return_value = mock_resp
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    return MagicMock(return_value=mock_session), mock_session
 
 
 # ---------------------------------------------------------------------------
@@ -67,46 +75,6 @@ class TestAnthropicProvider:
     def test_custom_api_key_env(self) -> None:
         p = AnthropicProvider(api_key_env="MY_KEY")
         assert p.api_key_env == "MY_KEY"
-
-    def test_call_returns_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        body = {"content": [{"type": "text", "text": "hello from claude"}]}
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            result = AnthropicProvider().call(
-                "claude-opus-4-7", [{"role": "user", "content": "hi"}], 100
-            )
-        assert result == "hello from claude"
-
-    def test_call_sends_correct_headers(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MY_ANTHROPIC_KEY", "sk-secret")
-        captured = {}
-
-        def capturing_urlopen(req, timeout=None):
-            captured["headers"] = dict(req.headers)
-            captured["url"] = req.full_url
-            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
-
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            AnthropicProvider(api_key_env="MY_ANTHROPIC_KEY").call("model", [], 10)
-
-        assert captured["headers"]["X-api-key"] == "sk-secret"
-        assert captured["url"] == "https://api.anthropic.com/v1/messages"
-
-    def test_call_sends_correct_payload(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-        captured = {}
-
-        def capturing_urlopen(req, timeout=None):
-            captured["payload"] = json.loads(req.data.decode())
-            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
-
-        msgs = [{"role": "user", "content": "test"}]
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            AnthropicProvider().call("claude-opus-4-7", msgs, 256)
-
-        assert captured["payload"]["model"] == "claude-opus-4-7"
-        assert captured["payload"]["messages"] == msgs
-        assert captured["payload"]["max_tokens"] == 256
 
 
 # ---------------------------------------------------------------------------
@@ -233,130 +201,57 @@ class TestToAnthropicMessages:
         assert content[1]["type"] == "tool_use"
 
 
-class TestFromAnthropicResponse:
-    def test_text_only(self) -> None:
-        data = {"content": [{"type": "text", "text": "hello"}]}
-        result = _from_anthropic_response(data)
-        assert result == {"content": "hello", "tool_calls": None}
-
-    def test_tool_use_only(self) -> None:
-        data = {
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": "id1",
-                    "name": "bash",
-                    "input": {"command": "ls"},
-                }
-            ]
-        }
-        result = _from_anthropic_response(data)
-        assert result["content"] is None
-        assert result["tool_calls"] == [
-            {
-                "id": "id1",
-                "function": {
-                    "name": "bash",
-                    "arguments": '{"command": "ls"}',
-                },
-            }
-        ]
-
-    def test_text_and_tool_use(self) -> None:
-        data = {
-            "content": [
-                {"type": "text", "text": "I'll run that"},
-                {
-                    "type": "tool_use",
-                    "id": "id1",
-                    "name": "bash",
-                    "input": {"command": "ls"},
-                },
-            ]
-        }
-        result = _from_anthropic_response(data)
-        assert result["content"] == "I'll run that"
-        assert result["tool_calls"] is not None
-
-    def test_empty_content(self) -> None:
-        result = _from_anthropic_response({"content": []})
-        assert result == {"content": None, "tool_calls": None}
-
-
 # ---------------------------------------------------------------------------
-# AnthropicProvider.call_raw
+# AnthropicProvider.async_call
 # ---------------------------------------------------------------------------
 
 
-class TestAnthropicProviderCallRaw:
-    def test_returns_normalized_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+class TestAnthropicProviderAsyncCall:
+    async def test_returns_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-        body = {"content": [{"type": "text", "text": "hello"}]}
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            result = AnthropicProvider().call_raw("model", [], 100)
-        assert result == {"content": "hello", "tool_calls": None}
+        body = {"content": [{"type": "text", "text": "hello from claude"}]}
+        mock_cls, _ = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            result = await AnthropicProvider().async_call(
+                "claude-opus-4-7", [{"role": "user", "content": "hi"}], 100
+            )
+        assert result == "hello from claude"
 
-    def test_separates_system_messages(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_sends_api_key_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MY_ANTHROPIC_KEY", "sk-secret")
+        body = {"content": [{"type": "text", "text": "ok"}]}
+        mock_cls, mock_session = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            await AnthropicProvider(api_key_env="MY_ANTHROPIC_KEY").async_call(
+                "model", [], 10
+            )
+        headers = mock_session.post.call_args.kwargs["headers"]
+        assert headers["x-api-key"] == "sk-secret"
+
+    async def test_sends_correct_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-        captured: dict = {}
+        body = {"content": [{"type": "text", "text": "ok"}]}
+        mock_cls, mock_session = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            await AnthropicProvider().async_call("model", [], 10)
+        url = mock_session.post.call_args.args[0]
+        assert url == "https://api.anthropic.com/v1/messages"
 
-        def capturing_urlopen(req, timeout=None):
-            captured["payload"] = json.loads(req.data.decode())
-            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
-
+    async def test_separates_system_messages(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        body = {"content": [{"type": "text", "text": "ok"}]}
+        mock_cls, mock_session = _mock_aiohttp_json(body)
         msgs = [
             {"role": "system", "content": "you are helpful"},
             {"role": "user", "content": "hello"},
         ]
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            AnthropicProvider().call_raw("model", msgs, 100)
-        assert captured["payload"]["system"] == "you are helpful"
-        assert captured["payload"]["messages"] == [{"role": "user", "content": "hello"}]
-
-    def test_converts_tools_to_anthropic_format(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-        captured: dict = {}
-
-        def capturing_urlopen(req, timeout=None):
-            captured["payload"] = json.loads(req.data.decode())
-            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
-
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "bash",
-                    "description": "run",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            }
-        ]
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            AnthropicProvider().call_raw("model", [], 100, tools=tools)
-        assert "tools" in captured["payload"]
-        assert captured["payload"]["tools"][0]["name"] == "bash"
-        assert "input_schema" in captured["payload"]["tools"][0]
-
-    def test_omits_tools_when_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-        captured: dict = {}
-
-        def capturing_urlopen(req, timeout=None):
-            captured["payload"] = json.loads(req.data.decode())
-            return _mock_urlopen({"content": [{"type": "text", "text": "ok"}]})
-
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            AnthropicProvider().call_raw("model", [], 100)
-        assert "tools" not in captured["payload"]
-
-    def test_call_delegates_to_call_raw(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-        body = {"content": [{"type": "text", "text": "delegated"}]}
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            result = AnthropicProvider().call("model", [], 100)
-        assert result == "delegated"
+        with patch("aiohttp.ClientSession", mock_cls):
+            await AnthropicProvider().async_call("model", msgs, 100)
+        payload = mock_session.post.call_args.kwargs["json"]
+        assert payload["system"] == "you are helpful"
+        assert payload["messages"] == [{"role": "user", "content": "hello"}]
 
 
 # ---------------------------------------------------------------------------
@@ -374,101 +269,56 @@ class TestOpenAICompatProvider:
         p = OpenAICompatProvider("http://host:8001")
         assert p.api_key_env is None
 
-    def test_call_returns_content(self) -> None:
+
+# ---------------------------------------------------------------------------
+# OpenAICompatProvider.async_call
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAICompatProviderAsyncCall:
+    async def test_returns_content(self) -> None:
         body = {"choices": [{"message": {"content": "hello"}}]}
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            result = OpenAICompatProvider("http://host:8001").call("llama", [], 100)
+        mock_cls, _ = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            result = await OpenAICompatProvider("http://host:8001").async_call(
+                "llama", [], 100
+            )
         assert result == "hello"
 
-    def test_call_sends_bearer_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_sends_bearer_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MY_KEY", "bearer-secret")
-        captured = {}
+        body = {"choices": [{"message": {"content": "ok"}}]}
+        mock_cls, mock_session = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            await OpenAICompatProvider(
+                "http://host:8001", api_key_env="MY_KEY"
+            ).async_call("llama", [], 10)
+        headers = mock_session.post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer bearer-secret"
 
-        def capturing_urlopen(req, timeout=None):
-            captured["headers"] = dict(req.headers)
-            return _mock_urlopen({"choices": [{"message": {"content": "ok"}}]})
+    async def test_no_auth_without_key(self) -> None:
+        body = {"choices": [{"message": {"content": "ok"}}]}
+        mock_cls, mock_session = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            await OpenAICompatProvider("http://host:8001").async_call("llama", [], 10)
+        headers = mock_session.post.call_args.kwargs.get("headers", {})
+        assert "Authorization" not in headers
 
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            OpenAICompatProvider("http://host:8001", api_key_env="MY_KEY").call(
+    async def test_normalizes_trailing_slash(self) -> None:
+        body = {"choices": [{"message": {"content": "ok"}}]}
+        mock_cls, mock_session = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            await OpenAICompatProvider("http://host:8001/").async_call("llama", [], 10)
+        url = mock_session.post.call_args.args[0]
+        assert url == "http://host:8001/v1/chat/completions"
+
+    async def test_returns_empty_string_for_none_content(self) -> None:
+        body = {"choices": [{"message": {"content": None}}]}
+        mock_cls, _ = _mock_aiohttp_json(body)
+        with patch("aiohttp.ClientSession", mock_cls):
+            result = await OpenAICompatProvider("http://host:8001").async_call(
                 "llama", [], 10
             )
-
-        assert captured["headers"]["Authorization"] == "Bearer bearer-secret"
-
-    def test_call_no_auth_header_without_key(self) -> None:
-        captured = {}
-
-        def capturing_urlopen(req, timeout=None):
-            captured["headers"] = dict(req.headers)
-            return _mock_urlopen({"choices": [{"message": {"content": "ok"}}]})
-
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            OpenAICompatProvider("http://host:8001").call("llama", [], 10)
-
-        assert "Authorization" not in captured["headers"]
-
-    def test_call_normalizes_trailing_slash(self) -> None:
-        captured = {}
-
-        def capturing_urlopen(req, timeout=None):
-            captured["url"] = req.full_url
-            return _mock_urlopen({"choices": [{"message": {"content": "ok"}}]})
-
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            OpenAICompatProvider("http://host:8001/").call("llama", [], 10)
-
-        assert captured["url"] == "http://host:8001/v1/chat/completions"
-
-    def test_call_raw_returns_message_dict(self) -> None:
-        msg = {"content": "hi", "tool_calls": None}
-        body = {"choices": [{"message": msg}]}
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            result = OpenAICompatProvider("http://host:8001").call_raw("llama", [], 100)
-        assert result == msg
-
-    def test_call_raw_includes_tools_in_payload(self) -> None:
-        captured = {}
-        tools = [{"type": "function", "function": {"name": "bash"}}]
-
-        def capturing_urlopen(req, timeout=None):
-            import json
-
-            captured["body"] = json.loads(req.data.decode())
-            return _mock_urlopen({"choices": [{"message": {"content": "ok"}}]})
-
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            OpenAICompatProvider("http://host:8001").call_raw(
-                "llama", [], 100, tools=tools
-            )
-
-        assert "tools" in captured["body"]
-        assert captured["body"]["tools"] == tools
-
-    def test_call_raw_omits_tools_when_none(self) -> None:
-        captured = {}
-
-        def capturing_urlopen(req, timeout=None):
-            import json
-
-            captured["body"] = json.loads(req.data.decode())
-            return _mock_urlopen({"choices": [{"message": {"content": "ok"}}]})
-
-        with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
-            OpenAICompatProvider("http://host:8001").call_raw("llama", [], 100)
-
-        assert "tools" not in captured["body"]
-
-    def test_call_delegates_to_call_raw(self) -> None:
-        msg = {"content": "from call_raw", "tool_calls": None}
-        body = {"choices": [{"message": msg}]}
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            result = OpenAICompatProvider("http://host:8001").call("llama", [], 100)
-        assert result == "from call_raw"
-
-    def test_call_returns_empty_string_for_none_content(self) -> None:
-        body = {"choices": [{"message": {"content": None, "tool_calls": []}}]}
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            result = OpenAICompatProvider("http://host:8001").call("llama", [], 100)
         assert result == ""
 
 
@@ -568,3 +418,14 @@ class TestBedrockProvider:
             BedrockProvider().call("model", [{"role": "user", "content": "hi"}], 100)
         call_kwargs = mock_client.converse.call_args[1]
         assert "system" not in call_kwargs
+
+    async def test_async_call_delegates_to_call(self) -> None:
+        mock_client = MagicMock()
+        mock_client.converse.return_value = {
+            "output": {"message": {"content": [{"text": "async reply"}]}}
+        }
+        with _boto3_mock(mock_client):
+            result = await BedrockProvider(aws_profile="p").async_call(
+                "model", [{"role": "user", "content": "hi"}], 100
+            )
+        assert result == "async reply"

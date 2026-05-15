@@ -88,3 +88,10 @@ class BedrockProvider(Provider):
 
         response = client.converse(**kwargs)
         return response["output"]["message"]["content"][0]["text"]
+
+    async def async_call(
+        self, model: str, messages: list[dict], max_tokens: int
+    ) -> str:
+        import asyncio
+
+        return await asyncio.to_thread(self.call, model, messages, max_tokens)

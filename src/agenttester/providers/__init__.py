@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .anthropic import (
     AnthropicProvider,
-    _from_anthropic_response,
     _to_anthropic_messages,
     _to_anthropic_tools,
 )
@@ -17,7 +16,6 @@ __all__ = [
     "BedrockProvider",
     "OpenAICompatProvider",
     "Provider",
-    "_from_anthropic_response",
     "_to_anthropic_messages",
     "_to_anthropic_tools",
 ]

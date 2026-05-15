@@ -62,15 +62,15 @@ class EvaluatorResult:
     duration: float
 
 
-def _call_llm(
+async def _call_llm(
     evaluator: EvaluatorConfig,
     messages: list[dict],
     max_tokens: int = 2048,
 ) -> str:
-    return evaluator.provider.call(evaluator.model, messages, max_tokens)
+    return await evaluator.provider.async_call(evaluator.model, messages, max_tokens)
 
 
-def evaluate_diff(
+async def evaluate_diff(
     evaluator: EvaluatorConfig,
     diff: str,
     original_prompt: str,
@@ -80,7 +80,7 @@ def evaluate_diff(
     start = time.monotonic()
     content = _EVAL_PROMPT.format(prompt=original_prompt, diff=diff or "(no changes)")
     try:
-        critique = _call_llm(evaluator, [{"role": "user", "content": content}])
+        critique = await _call_llm(evaluator, [{"role": "user", "content": content}])
     except Exception as e:
         critique = f"[evaluation error: {e}]"
     return EvaluatorResult(
@@ -91,7 +91,7 @@ def evaluate_diff(
     )
 
 
-def aggregate_evaluations(
+async def aggregate_evaluations(
     results: list[EvaluatorResult],
     aggregator: EvaluatorConfig,
     agent_name: str,
@@ -107,12 +107,12 @@ def aggregate_evaluations(
     )
     content = _AGGREGATE_PROMPT.format(agent_name=agent_name, reviews=reviews)
     try:
-        return _call_llm(aggregator, [{"role": "user", "content": content}])
+        return await _call_llm(aggregator, [{"role": "user", "content": content}])
     except Exception as e:
         return f"[aggregation error: {e}]\n\n{reviews}"
 
 
-def summarize_if_needed(
+async def summarize_if_needed(
     text: str,
     max_tokens: int,
     summarizer: EvaluatorConfig,
@@ -122,7 +122,7 @@ def summarize_if_needed(
         return text
     content = _SUMMARIZE_PROMPT.format(text=text)
     try:
-        return _call_llm(
+        return await _call_llm(
             summarizer, [{"role": "user", "content": content}], max_tokens=500
         )
     except Exception:

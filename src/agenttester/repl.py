@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import urllib.error
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -135,27 +134,6 @@ def load_models(config_path: Path | None = None) -> dict[str, Model]:
     return models
 
 
-def _query_sync(
-    model: Model,
-    prompt: str,
-    max_tokens: int = 2048,
-    on_event: Callable[[str, str], None] | None = None,
-) -> str:
-    """Synchronous query path (Bedrock and other non-streaming providers)."""
-    model.messages.append({"role": "user", "content": prompt})
-    try:
-        reply = model.provider.call(model.model_id, model.messages, max_tokens)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        model.messages.pop()
-        return f"[error] HTTP {e.code}: {body}"
-    except Exception as e:
-        model.messages.pop()
-        return f"[error] {e}"
-    model.messages.append({"role": "assistant", "content": reply})
-    return reply
-
-
 async def _query_async(
     model: Model,
     prompt: str,
@@ -163,7 +141,7 @@ async def _query_async(
     on_event: Callable[[str, str], None] | None = None,
 ) -> str:
     """Async query path: uses the full streaming agent loop for OpenAI/Anthropic
-    providers; falls back to a thread for Bedrock and other sync-only providers.
+    providers; falls back to async_call for Bedrock and other providers.
     """
     if model.tool_executor and isinstance(
         model.provider, (AnthropicProvider, OpenAICompatProvider)
@@ -203,11 +181,17 @@ async def _query_async(
         model.messages.append({"role": "assistant", "content": reply})
         return reply
 
-    # Bedrock and other sync-only providers.
+    # Bedrock and other providers: use async_call
+    model.messages.append({"role": "user", "content": prompt})
     try:
-        return await asyncio.to_thread(_query_sync, model, prompt, max_tokens, on_event)
+        reply = await model.provider.async_call(
+            model.model_id, model.messages, max_tokens
+        )
     except Exception as e:
+        model.messages.pop()
         return f"[error] {e}"
+    model.messages.append({"role": "assistant", "content": reply})
+    return reply
 
 
 async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
@@ -220,7 +204,7 @@ async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
 
     async def _check(m: Model) -> bool:
         if isinstance(m.provider, OpenAICompatProvider):
-            return await asyncio.to_thread(check_connection, m.provider.endpoint)
+            return await check_connection(m.provider.endpoint)
         return True
 
     results = await asyncio.gather(*[_check(m) for m in models.values()])
@@ -260,9 +244,7 @@ async def _gather_names(models: dict[str, Model], user_prompt: str) -> dict[str,
     async def _one(name: str, model: Model) -> tuple[str, str]:
         msgs = [{"role": "user", "content": user_prompt}]
         try:
-            reply = await asyncio.to_thread(
-                model.provider.call, model.model_id, msgs, 64
-            )
+            reply = await model.provider.async_call(model.model_id, msgs, 64)
             return name, _clean_name(reply)
         except Exception:
             return name, ""

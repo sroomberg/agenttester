@@ -9,10 +9,6 @@ class Provider(ABC):
     """Abstract base class for LLM providers."""
 
     @abstractmethod
-    def call(
-        self,
-        model: str,
-        messages: list[dict],
-        max_tokens: int,
-        timeout: int = 120,
+    async def async_call(
+        self, model: str, messages: list[dict], max_tokens: int
     ) -> str: ...

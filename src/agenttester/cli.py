@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import urllib.error
 from pathlib import Path
 from typing import Annotated
 
@@ -193,15 +192,18 @@ def query(
 ) -> None:
     """Query a vLLM model server and print the response."""
     try:
-        result = _vllm_query(
-            endpoint, model_id, [{"role": "user", "content": prompt}], max_tokens
+        import aiohttp
+
+        result = asyncio.run(
+            _vllm_query(
+                endpoint, model_id, [{"role": "user", "content": prompt}], max_tokens
+            )
         )
         console.print(result)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        console.print(f"[red]HTTP {e.code}: {body}[/red]")
+    except aiohttp.ClientResponseError as e:
+        console.print(f"[red]HTTP {e.status}: {e.message}[/red]")
         raise typer.Exit(1) from e
-    except OSError as e:
+    except Exception as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from e
 
