@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.15.1 — 2026-05-15
+- **`agent-tester --resume <SESSION_ID>`**: resume a session without the `repl` subcommand; the exit message now shows this form instead of `repl --session`
+
 ## v0.15.0 — 2026-05-15
 - **`agent-tester cleanup`**: interactive branch cleanup command; iterates through sessions in two phases — (1) select sessions to delete entirely, (2) for remaining sessions select individual model branches to drop; then choose local-only / remote-only / both before a final confirmation
 - Sessions now record the branch names they create in the session JSON (`branches` field), enabling accurate per-session cleanup; old session files without this field are handled gracefully

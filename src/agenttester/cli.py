@@ -32,10 +32,14 @@ def default(
         bool,
         typer.Option("--skip-checks", "-S", help="Skip endpoint connection checks"),
     ] = False,
+    resume: Annotated[
+        str | None,
+        typer.Option("--resume", "-r", help="Resume a previous session by ID"),
+    ] = None,
 ) -> None:
     """Open the interactive REPL when no subcommand is given."""
     if ctx.invoked_subcommand is None:
-        asyncio.run(run_repl(skip_checks=skip_checks))
+        asyncio.run(run_repl(skip_checks=skip_checks, session_name=resume))
 
 
 def _find_git_root(start: Path) -> Path:
