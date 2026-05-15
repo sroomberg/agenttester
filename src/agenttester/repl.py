@@ -7,6 +7,7 @@ import re
 import urllib.error
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -263,18 +264,18 @@ async def run_repl(
 
         models = live_models
 
-    # Session setup
-    session: ReplSession | None = None
-    if session_name:
-        session, is_new = ReplSession.load_or_create(session_name)
-        if is_new:
-            console.print(f"[dim]New session: {session_name}[/dim]")
-        else:
-            n = sum(len(h) for h in session.histories.values())
-            console.print(
-                f"[dim]Resuming session: {session_name}"
-                f" ({n} message(s) across {len(session.histories)} model(s))[/dim]"
-            )
+    # Session setup — always create one; auto-generate a name when none given
+    if not session_name:
+        session_name = datetime.now().strftime("%Y%m%d-%H%M%S")
+    session, is_new = ReplSession.load_or_create(session_name)
+    if is_new:
+        console.print(f"[dim]Session: {session_name}[/dim]")
+    else:
+        n = sum(len(h) for h in session.histories.values())
+        console.print(
+            f"[dim]Session: {session_name}"
+            f"  ({n} message(s) across {len(session.histories)} model(s))[/dim]"
+        )
 
     # Worktree + tool use setup — defaults to CWD so branches land in the
     # repo the REPL is invoked from when --workdir is not explicitly given.
@@ -432,13 +433,10 @@ async def run_repl(
                     console.print(f"[dim]still waiting: {', '.join(pending)}[/dim]")
             console.print()
     finally:
-        if session:
-            for name, model in models.items():
-                session.histories[name] = list(model.messages)
-            session.save()
-            console.print(
-                f"\n[dim]bye  —  agent-tester repl --session {session_name}"
-                "  to resume[/dim]"
-            )
-        else:
-            console.print("\n[dim]bye[/dim]")
+        for name, model in models.items():
+            session.histories[name] = list(model.messages)
+        session.save()
+        console.print(
+            f"\n[dim]bye  —  agent-tester repl --session {session_name}"
+            "  to resume[/dim]"
+        )

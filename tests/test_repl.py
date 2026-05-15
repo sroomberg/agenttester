@@ -503,6 +503,10 @@ class TestRunReplSkillSeeding:
             patch("agenttester.repl.load_skills", return_value="do the thing"),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
         ):
             mock_session = mock_session_cls.return_value
             mock_session.prompt_async = fake_prompt
@@ -524,6 +528,10 @@ class TestRunReplSkillSeeding:
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls2,
             patch("agenttester.repl._query_sync", side_effect=capture2),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
         ):
             mock_session2 = mock_session_cls2.return_value
             mock_session2.prompt_async = fake_prompt2
@@ -552,6 +560,10 @@ class TestRunReplSkillSeeding:
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
             patch("agenttester.repl._query_sync", side_effect=capture),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
         ):
             mock_session = mock_session_cls.return_value
             mock_session.prompt_async = fake_prompt
@@ -580,6 +592,10 @@ class TestRunReplSkillSeeding:
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
             patch("agenttester.repl._query_sync", side_effect=capture),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
         ):
             mock_session = mock_session_cls.return_value
             mock_session.prompt_async = fake_prompt

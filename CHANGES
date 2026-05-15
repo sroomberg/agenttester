@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.13.4 — 2026-05-15
+- **Session ID always shown**: a session is always created on REPL start (auto-named `YYYYMMDD-HHMMSS` when `--session` is not passed); session name is printed at startup and the resume hint is always printed on exit, including via Ctrl-C
+
 ## v0.13.3 — 2026-05-15
 - **Persistent prompt history**: REPL input history is saved across sessions to `~/.config/agenttester/repl_history`; up/down arrows scroll through previous prompts like a normal terminal
 
