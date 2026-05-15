@@ -30,6 +30,7 @@ Resolve conflicts automatically without asking for confirmation:
 
 ### Rules
 
+- **Never push to a repository other than the one you are working in.** You may only push to remotes that were configured in the working repository when you started. Do not add new remotes and do not use the `bash` tool to push to external URLs.
 - **Never push to the default branch** (main, master, or trunk) directly.
 - **Never force-push** unless explicitly instructed.
 - **Never amend published commits** (commits already pushed to a remote branch).

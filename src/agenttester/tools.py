@@ -184,6 +184,25 @@ class ToolExecutor:
         self._worktree_created = False
         self._model_name = model_name
         self.notify_url = notify_url
+        self._original_remote_urls: set[str] = self._get_remote_urls(self.workdir)
+
+    @staticmethod
+    def _get_remote_urls(workdir: str) -> set[str]:
+        try:
+            result = subprocess.run(
+                ["git", "remote", "-v"],
+                capture_output=True,
+                text=True,
+                cwd=workdir,
+            )
+            urls: set[str] = set()
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    urls.add(parts[1])
+            return urls
+        except Exception:
+            return set()
 
     @property
     def tool_definitions(self) -> list[dict]:
@@ -255,18 +274,7 @@ class ToolExecutor:
         return output or "(no output)"
 
     def _tool_bash(self, command: str) -> str:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=self.workdir,
-            env=os.environ.copy(),
-        )
-        output = _truncate((result.stdout + result.stderr).strip())
-        if result.returncode != 0:
-            return f"Error (exit {result.returncode}): {output}"
-        return output or "(no output)"
+        return self._run(["bash", "-c", command])
 
     def _tool_read_file(self, path: str) -> str:
         p = Path(path) if Path(path).is_absolute() else Path(self.workdir) / path
@@ -303,6 +311,20 @@ class ToolExecutor:
         return self._run(["git", "commit", "-m", message])
 
     def _tool_git_push(self, branch: str, remote: str = "origin") -> str:
+        url_result = subprocess.run(
+            ["git", "remote", "get-url", remote],
+            capture_output=True,
+            text=True,
+            cwd=self.workdir,
+        )
+        if url_result.returncode != 0:
+            return f"Error: remote {remote!r} not found"
+        remote_url = url_result.stdout.strip()
+        if remote_url not in self._original_remote_urls:
+            return (
+                f"Error: push to {remote_url!r} is not allowed — "
+                "you may only push to the repository you are working in."
+            )
         return self._run(["git", "push", remote, branch], extra_env=self._git_env())
 
     def _tool_notify(self, result: str) -> str:

@@ -193,38 +193,77 @@ class TestGitCommit:
 # ---------------------------------------------------------------------------
 
 
+_REPO_URL = "https://github.com/example/repo.git"
+
+
+def _push_side_effect(remote_url: str = _REPO_URL, push_returncode: int = 0):
+    """Return a side_effect list for the two subprocess.run calls in _tool_git_push.
+
+    First call: git remote get-url <remote>
+    Second call: git push <remote> <branch>
+    """
+    return [
+        MagicMock(returncode=0, stdout=remote_url, stderr=""),
+        MagicMock(returncode=push_returncode, stdout="ok", stderr=""),
+    ]
+
+
 class TestGitPush:
     def test_calls_git_push(self, tmp_path: Path) -> None:
         ex = ToolExecutor(workdir=str(tmp_path))
+        ex._original_remote_urls = {_REPO_URL}
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="pushed", stderr="")
+            mock_run.side_effect = _push_side_effect()
             ex.execute("git_push", {"branch": "my-branch"})
-        cmd = mock_run.call_args[0][0]
+        cmd = mock_run.call_args_list[1][0][0]
         assert cmd == ["git", "push", "origin", "my-branch"]
 
     def test_custom_remote(self, tmp_path: Path) -> None:
         ex = ToolExecutor(workdir=str(tmp_path))
+        ex._original_remote_urls = {_REPO_URL}
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_run.side_effect = _push_side_effect()
             ex.execute("git_push", {"branch": "feat", "remote": "upstream"})
-        cmd = mock_run.call_args[0][0]
+        cmd = mock_run.call_args_list[1][0][0]
         assert "upstream" in cmd
 
     def test_pem_sets_git_ssh_command(self, tmp_path: Path) -> None:
         ex = ToolExecutor(workdir=str(tmp_path), pem_path="/my.pem")
+        ex._original_remote_urls = {_REPO_URL}
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_run.side_effect = _push_side_effect()
             ex.execute("git_push", {"branch": "main"})
-        env = mock_run.call_args[1]["env"]
+        env = mock_run.call_args_list[1][1]["env"]
         assert "/my.pem" in env["GIT_SSH_COMMAND"]
 
     def test_no_pem_no_ssh_override(self, tmp_path: Path) -> None:
         ex = ToolExecutor(workdir=str(tmp_path))
+        ex._original_remote_urls = {_REPO_URL}
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_run.side_effect = _push_side_effect()
             ex.execute("git_push", {"branch": "main"})
-        env = mock_run.call_args[1]["env"]
+        env = mock_run.call_args_list[1][1]["env"]
         assert "GIT_SSH_COMMAND" not in env
+
+    def test_rejects_unknown_remote_name(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path))
+        ex._original_remote_urls = {_REPO_URL}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+            result = ex.execute("git_push", {"branch": "main", "remote": "foreign"})
+        assert "Error" in result
+        assert mock_run.call_count == 1
+
+    def test_rejects_foreign_repo_url(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path))
+        ex._original_remote_urls = {_REPO_URL}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = _push_side_effect(
+                remote_url="https://github.com/attacker/other.git"
+            )
+            result = ex.execute("git_push", {"branch": "main"})
+        assert "not allowed" in result
+        assert mock_run.call_count == 1
 
 
 # ---------------------------------------------------------------------------
