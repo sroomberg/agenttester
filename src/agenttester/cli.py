@@ -266,7 +266,7 @@ def repl(
 
 
 @app.command()
-def watcher(
+def watch(
     session: Annotated[
         str, typer.Option("--session", "-s", help="Session ID to watch")
     ],

@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.16.1 — 2026-05-15
+- Rename `agent-tester watcher` to `agent-tester watch`
+
 ## v0.16.0 — 2026-05-15
 - **Fix: branch negotiation runs only once per session** — the branch name is negotiated on the first prompt and reused for all subsequent prompts; no more redundant LLM calls per message
 - **`agent-tester watcher --session ID --model NAME`**: open a separate terminal window that tail-follows a model's full activity log — every prompt, tool call, tool result, and response rendered in real-time with Rich

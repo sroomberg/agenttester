@@ -296,7 +296,7 @@ The main REPL shows brief per-model status (`✓ model: done`, `✗ model: error
 the full context — every prompt, tool call, and response — open a second terminal:
 
 ```bash
-agent-tester watcher --session <SESSION_ID> --model <MODEL_NAME>
+agent-tester watch --session <SESSION_ID> --model <MODEL_NAME>
 ```
 
 The watcher tail-follows the model's event log at
