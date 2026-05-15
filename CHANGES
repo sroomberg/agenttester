@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.17.0 — 2026-05-15
+- **Streaming responses**: all LLM calls in the agent loop now use SSE streaming (`stream: true`) for OpenAI-compatible endpoints and Anthropic's streaming Messages API; text arrives token-by-token rather than as a single block after full completion
+- **Live watcher streaming**: `agent-tester watch` displays text chunks inline as they arrive during the live tail phase; historical events are replayed as panels on attach; tool calls and tool results interrupt and resume streaming display cleanly
+- `chunk` event type added to the per-model JSONL event log; `response` event still logged at the end with the full accumulated text for history replay
+
 ## v0.16.1 — 2026-05-15
 - Rename `agent-tester watcher` to `agent-tester watch`
 

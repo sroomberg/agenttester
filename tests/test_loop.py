@@ -10,7 +10,12 @@ from agenttester.tools import ToolExecutor
 
 def _make_provider(responses: list[dict]) -> MagicMock:
     provider = MagicMock()
-    provider.call_raw.side_effect = responses
+    # stream_raw returns the same normalized dict as call_raw; on_chunk is ignored
+    provider.stream_raw.side_effect = [
+        # wrap so on_chunk kwarg is accepted and ignored
+        r
+        for r in responses
+    ]
     return provider
 
 

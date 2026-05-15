@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import Any
 
-from .providers import OpenAICompatProvider
 from .tools import ToolExecutor
 
 
 def run_agent_loop(
-    provider: OpenAICompatProvider,
+    provider: Any,
     model_id: str,
     messages: list[dict],
     prompt: str,
@@ -24,15 +24,24 @@ def run_agent_loop(
     assistant response to *messages*.  Returns the final text response.
 
     on_event(type, content) is called for observability:
+        "chunk"       → streaming text chunk (may fire many times per turn)
         "tool_call"   → "{tool_name}: {args_json}"
         "tool_result" → tool output string
-        "text"        → final assistant text
+        "text"        → final assistant text (full accumulated response)
     """
     messages.append({"role": "user", "content": prompt})
 
+    def _on_chunk(chunk: str) -> None:
+        if on_event:
+            on_event("chunk", chunk)
+
     for _ in range(max_turns):
-        msg = provider.call_raw(
-            model_id, messages, 4096, tools=executor.tool_definitions
+        msg = provider.stream_raw(
+            model_id,
+            messages,
+            4096,
+            tools=executor.tool_definitions,
+            on_chunk=_on_chunk,
         )
         tool_calls = msg.get("tool_calls")
 
