@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import re
 import urllib.error
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -266,7 +266,7 @@ async def run_repl(
 
     # Session setup — always create one; auto-generate a name when none given
     if not session_name:
-        session_name = datetime.now().strftime("%Y%m%d-%H%M%S")
+        session_name = str(uuid.uuid4())
     session, is_new = ReplSession.load_or_create(session_name)
     if is_new:
         console.print(f"[dim]Session: {session_name}[/dim]")

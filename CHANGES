@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.13.5 — 2026-05-15
+- Auto-generated session names use UUID4 instead of a datetime string
+
 ## v0.13.4 — 2026-05-15
 - **Session ID always shown**: a session is always created on REPL start (auto-named `YYYYMMDD-HHMMSS` when `--session` is not passed); session name is printed at startup and the resume hint is always printed on exit, including via Ctrl-C
 
