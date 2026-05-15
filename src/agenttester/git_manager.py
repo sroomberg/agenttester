@@ -72,6 +72,39 @@ class GitManager:
         """Return the first 8 characters of the HEAD commit SHA."""
         return self.repo.head.commit.hexsha[:8]
 
+    def list_agenttester_branches(self) -> list[str]:
+        """Return all local branch names under the agenttester/ prefix."""
+        return [h.name for h in self.repo.heads if h.name.startswith("agenttester/")]
+
+    def delete_local_branch(self, branch: str) -> bool:
+        """Remove any associated worktree then delete the local branch.
+
+        Returns True on success.
+        """
+        parts = branch.split("/", 2)
+        if len(parts) == 3 and parts[0] == "agenttester":
+            _, model, slug = parts
+            worktree_path = self.worktree_base / slug / model
+            if worktree_path.exists():
+                with contextlib.suppress(GitCommandError):
+                    self.repo.git.worktree("remove", str(worktree_path), "--force")
+        try:
+            self.repo.git.branch("-D", branch)
+            return True
+        except GitCommandError:
+            return False
+
+    def delete_remote_branch(self, branch: str, remote: str = "origin") -> bool:
+        """Push a delete refspec for *branch* to *remote*.
+
+        Returns True on success.
+        """
+        try:
+            self.repo.git.push(remote, "--delete", branch)
+            return True
+        except GitCommandError:
+            return False
+
     def pull_from_remote(self) -> bool:
         """Pull latest changes from origin.
 

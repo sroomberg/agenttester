@@ -484,6 +484,11 @@ async def run_repl(
             for m in target_models.values():
                 if m.tool_executor is not None:
                     m.tool_executor.set_branch_slug(branch_slug)
+                branch_name = (
+                    f"agenttester/{_sanitize_ref_component(m.name)}/{branch_slug}"
+                )
+                if branch_name not in session.branches:
+                    session.branches.append(branch_name)
 
             n = len(target_models)
             label = "model" if n == 1 else "models"

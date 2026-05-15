@@ -20,6 +20,7 @@ class ReplSession:
     id: str
     created_at: str
     histories: dict[str, list[dict]] = field(default_factory=dict)
+    branches: list[str] = field(default_factory=list)
 
     @classmethod
     def create(cls, name: str) -> ReplSession:
@@ -36,6 +37,7 @@ class ReplSession:
             id=data["id"],
             created_at=data["created_at"],
             histories=data.get("histories", {}),
+            branches=data.get("branches", []),
         )
 
     @classmethod
@@ -62,6 +64,7 @@ class ReplSession:
                     "id": self.id,
                     "created_at": self.created_at,
                     "histories": self.histories,
+                    "branches": self.branches,
                 },
                 indent=2,
             )

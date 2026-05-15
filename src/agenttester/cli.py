@@ -281,6 +281,27 @@ def serve(
         asyncio.run(run_server(host=host, port=port))
 
 
+@app.command()
+def cleanup(
+    workdir: Annotated[
+        Path | None,
+        typer.Option(
+            "--workdir",
+            "-w",
+            help="Git repo to scan for agenttester branches (default: CWD)",
+        ),
+    ] = None,
+    remote: Annotated[
+        str,
+        typer.Option("--remote", help="Remote name for remote branch deletion"),
+    ] = "origin",
+) -> None:
+    """Interactively clean up branches from old REPL sessions."""
+    from .cleanup import run_cleanup
+
+    run_cleanup(workdir or Path.cwd(), remote=remote)
+
+
 @app.command("agents")
 def list_agents(
     config: Annotated[
