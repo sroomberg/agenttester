@@ -217,6 +217,7 @@ async def run_repl(
     session_name: str | None = None,
     workdir: Path | None = None,
     pem_path: str | None = None,
+    notify_url: str | None = None,
 ) -> None:
     console = Console()
     models = load_models(config_path)
@@ -291,6 +292,8 @@ async def run_repl(
                             _mn, slug
                         )
                     ),
+                    model_name=mn,
+                    notify_url=notify_url,
                 )
         else:
             git_mgr = None
@@ -300,7 +303,10 @@ async def run_repl(
             )
             for model in models.values():
                 model.tool_executor = ToolExecutor(
-                    workdir=str(workdir_path), pem_path=pem_path
+                    workdir=str(workdir_path),
+                    pem_path=pem_path,
+                    model_name=model.name,
+                    notify_url=notify_url,
                 )
     except Exception:
         git_mgr = None
@@ -311,7 +317,10 @@ async def run_repl(
             )
         for model in models.values():
             model.tool_executor = ToolExecutor(
-                workdir=str(workdir_path), pem_path=pem_path
+                workdir=str(workdir_path),
+                pem_path=pem_path,
+                model_name=model.name,
+                notify_url=notify_url,
             )
 
     # Skill seeding

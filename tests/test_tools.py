@@ -225,3 +225,101 @@ class TestGitPush:
             ex.execute("git_push", {"branch": "main"})
         env = mock_run.call_args[1]["env"]
         assert "GIT_SSH_COMMAND" not in env
+
+
+# ---------------------------------------------------------------------------
+# tool_definitions property
+# ---------------------------------------------------------------------------
+
+
+class TestToolDefinitions:
+    def test_notify_excluded_without_url(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path))
+        names = [t["function"]["name"] for t in ex.tool_definitions]
+        assert "notify" not in names
+
+    def test_notify_included_with_url(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path), notify_url="http://localhost:8765")
+        names = [t["function"]["name"] for t in ex.tool_definitions]
+        assert "notify" in names
+
+    def test_base_tools_always_present(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path))
+        names = [t["function"]["name"] for t in ex.tool_definitions]
+        assert "bash" in names
+        assert "write_file" in names
+
+
+# ---------------------------------------------------------------------------
+# notify tool
+# ---------------------------------------------------------------------------
+
+
+class TestNotify:
+    def test_without_url_returns_message(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path))
+        result = ex.execute("notify", {"result": "done"})
+        assert "No notify endpoint" in result
+
+    def test_posts_to_server(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path), notify_url="http://localhost:9999")
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = ex.execute("notify", {"result": "task complete"})
+        assert "200" in result
+
+    def test_payload_includes_model_name(self, tmp_path: Path) -> None:
+        import json
+
+        ex = ToolExecutor(
+            workdir=str(tmp_path),
+            notify_url="http://localhost:9999",
+            model_name="gpt-4",
+        )
+        captured: list = []
+
+        def fake_urlopen(req, **kwargs):
+            captured.append(req)
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ex.execute("notify", {"result": "done"})
+
+        payload = json.loads(captured[0].data)
+        assert payload["model"] == "gpt-4"
+        assert payload["result"] == "done"
+
+    def test_posts_to_result_path(self, tmp_path: Path) -> None:
+        ex = ToolExecutor(workdir=str(tmp_path), notify_url="http://localhost:9999")
+        captured: list = []
+
+        def fake_urlopen(req, **kwargs):
+            captured.append(req)
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ex.execute("notify", {"result": "done"})
+
+        assert captured[0].full_url.endswith("/result")
+
+    def test_network_error_returns_message(self, tmp_path: Path) -> None:
+        import urllib.error
+
+        ex = ToolExecutor(workdir=str(tmp_path), notify_url="http://localhost:9999")
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            result = ex.execute("notify", {"result": "done"})
+        assert "Notify failed" in result

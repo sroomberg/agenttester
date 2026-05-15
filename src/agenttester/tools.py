@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
@@ -131,6 +134,27 @@ TOOL_DEFINITIONS: list[dict] = [
     },
 ]
 
+_NOTIFY_TOOL_DEF: dict = {
+    "type": "function",
+    "function": {
+        "name": "notify",
+        "description": (
+            "Post your final result back to the agent-tester server"
+            " when the task is complete."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "result": {
+                    "type": "string",
+                    "description": "Summary of what was accomplished",
+                },
+            },
+            "required": ["result"],
+        },
+    },
+}
+
 
 def _truncate(output: str, max_bytes: int = _MAX_OUTPUT_BYTES) -> str:
     encoded = output.encode()
@@ -150,12 +174,23 @@ class ToolExecutor:
         workdir: str = ".",
         pem_path: str | None = None,
         worktree_creator: Callable[[str], Path] | None = None,
+        model_name: str | None = None,
+        notify_url: str | None = None,
     ) -> None:
         self.workdir = str(Path(workdir).resolve())
         self.pem_path = pem_path
         self._worktree_creator = worktree_creator
         self._branch_slug: str | None = None
         self._worktree_created = False
+        self._model_name = model_name
+        self.notify_url = notify_url
+
+    @property
+    def tool_definitions(self) -> list[dict]:
+        base = list(TOOL_DEFINITIONS)
+        if self.notify_url:
+            base.append(_NOTIFY_TOOL_DEF)
+        return base
 
     def set_branch_slug(self, slug: str) -> None:
         """Set the branch slug to use on the next write, if no worktree yet."""
@@ -182,6 +217,7 @@ class ToolExecutor:
             "git_clone": self._tool_git_clone,
             "git_commit": self._tool_git_commit,
             "git_push": self._tool_git_push,
+            "notify": self._tool_notify,
         }
         fn = dispatch.get(tool_name)
         if fn is None:
@@ -268,3 +304,21 @@ class ToolExecutor:
 
     def _tool_git_push(self, branch: str, remote: str = "origin") -> str:
         return self._run(["git", "push", remote, branch], extra_env=self._git_env())
+
+    def _tool_notify(self, result: str) -> str:
+        if not self.notify_url:
+            return "No notify endpoint configured."
+        payload = json.dumps(
+            {"model": self._model_name or "unknown", "result": result}
+        ).encode()
+        req = urllib.request.Request(
+            f"{self.notify_url.rstrip('/')}/result",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return f"Notified server: HTTP {resp.status}"
+        except urllib.error.URLError as e:
+            return f"Notify failed: {e}"

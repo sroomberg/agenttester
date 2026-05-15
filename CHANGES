@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.12.0 — 2026-05-14
+- **`agent-tester serve`**: new subcommand that opens an HTTP receiver (`POST /result`, `GET /health`) where external agents can POST completion results; rendered as Rich panels in real-time
+- **`notify` tool**: when `--notify-url` is passed to `agent-tester repl`, models gain a `notify` tool they can call to POST their final result back to the server; the tool is absent from the tool list when no URL is configured
+- **`agent-tester repl --notify-url`**: new flag that wires the notify tool to a running `agent-tester serve` instance
+
 ## v0.11.5 — 2026-05-14
 - **Live multi-model display**: when querying multiple models the REPL now renders all response panels immediately (with animated spinners), then fills each in as its model completes — built with `rich.Live` + `rich.Spinner`
 

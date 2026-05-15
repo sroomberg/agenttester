@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 
 from .providers import OpenAICompatProvider
-from .tools import TOOL_DEFINITIONS, ToolExecutor
+from .tools import ToolExecutor
 
 
 def run_agent_loop(
@@ -31,7 +31,9 @@ def run_agent_loop(
     messages.append({"role": "user", "content": prompt})
 
     for _ in range(max_turns):
-        msg = provider.call_raw(model_id, messages, 4096, tools=TOOL_DEFINITIONS)
+        msg = provider.call_raw(
+            model_id, messages, 4096, tools=executor.tool_definitions
+        )
         tool_calls = msg.get("tool_calls")
 
         if not tool_calls:

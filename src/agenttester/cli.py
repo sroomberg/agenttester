@@ -238,6 +238,15 @@ def repl(
         str | None,
         typer.Option("--pem", help="SSH PEM key path for git push authentication"),
     ] = None,
+    notify_url: Annotated[
+        str | None,
+        typer.Option(
+            "--notify-url",
+            help=(
+                "agent-tester server URL; gives models a 'notify' tool to POST results"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Start an interactive multi-model REPL."""
     asyncio.run(
@@ -247,8 +256,29 @@ def repl(
             session_name=session,
             workdir=workdir,
             pem_path=pem,
+            notify_url=notify_url,
         )
     )
+
+
+@app.command()
+def serve(
+    port: Annotated[
+        int,
+        typer.Option("--port", "-p", help="Port to listen on"),
+    ] = 8765,
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Host to bind to"),
+    ] = "127.0.0.1",
+) -> None:
+    """Start an HTTP receiver for agent completion callbacks."""
+    import contextlib
+
+    from .server import run_server
+
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(run_server(host=host, port=port))
 
 
 @app.command("agents")
