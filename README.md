@@ -261,37 +261,66 @@ All iterations land on the same branch — use `git log` to see the progression.
 
 ## Interactive Model REPL
 
-For comparing responses from vLLM model servers interactively, with persistent
-conversation history within a session:
+For querying and comparing multiple models interactively, with persistent conversation
+history and tool use:
 
 ```bash
-agent-tester repl                         # auto-discovers agent-tester.yaml
-agent-tester repl --config custom.yaml    # explicit config path
-agent-tester repl --session my-session    # save/restore conversation history
+agent-tester                              # open REPL (auto-discovers agent-tester.yaml)
+agent-tester --resume <SESSION_ID>        # resume a previous session
+agent-tester repl --config custom.yaml   # explicit config path
 agent-tester repl --workdir /path/to/repo # enable tool use with a target repo
 ```
 
 The REPL fans out each prompt to all configured models in parallel and maintains separate
 conversation history per model. Use `/reset` to clear history, `@modelname message` to
-address a single model, or `exit` to quit. Tab-completes model names after `@`.
+address a single model, or `exit` / Ctrl-C to quit. Tab-completes model names after `@`.
+Prompt history is persisted across invocations in `~/.config/agenttester/repl_history`.
 
 ### Sessions
 
-Pass `--session <name>` to persist conversation history across REPL invocations. On exit,
-each model's history is saved to `~/.config/agenttester/sessions/<name>.json`. The next
-time you run `repl --session <name>`, history is restored and the conversation continues
-where it left off.
+A session is always created automatically. A UUID is generated when no `--session` is
+passed. The session ID is printed at startup and in the exit message:
+
+```
+Session: 3f2a1b4c-8d9e-4f0a-b1c2-d3e4f5a6b7c8
+...
+bye  —  agent-tester --resume 3f2a1b4c-8d9e-4f0a-b1c2-d3e4f5a6b7c8
+```
+
+Each model's conversation history is saved on exit to
+`~/.config/agenttester/sessions/<session-id>.json` and restored on resume.
+
+### Watcher
+
+The main REPL shows brief per-model status (`✓ model: done`, `✗ model: error`). To see
+the full context — every prompt, tool call, and response — open a second terminal:
+
+```bash
+agent-tester watcher --session <SESSION_ID> --model <MODEL_NAME>
+```
+
+The watcher tail-follows the model's event log at
+`~/.config/agenttester/sessions/<session-id>/events/<model>.jsonl` and renders each event
+with Rich as it arrives. You can open one watcher per model and keep the main REPL for
+sending prompts.
 
 ### Tool use and branches
 
-Pass `--workdir <dir>` to enable an agent loop for OpenAI-compatible models. Each model
-gains access to `bash`, `read_file`, `write_file`, `git_clone`, `git_commit`, and
-`git_push` tools. When `--workdir` is a git repo, each model automatically works in its
-own worktree on a dedicated branch:
+Pass `--workdir <dir>` to enable an agent loop for OpenAI-compatible and Anthropic models.
+Each model gains access to `bash`, `read_file`, `write_file`, `git_clone`, `git_commit`,
+and `git_push` tools. When `--workdir` is a git repo, each model works in its own worktree
+on a dedicated branch.
+
+Before the first prompt is dispatched, all models negotiate a branch name in up to two
+rounds (silent LLM calls that don't affect conversation history). The agreed name is
+combined with the HEAD commit hash:
 
 ```
-agenttester/<model-name>/<session-name>
+agenttester/<model-name>/<8-char-hash>-<feature-name>
 ```
+
+The branch is created lazily on the first write and reused for all subsequent prompts in
+the same session.
 
 Use `--pem <path>` to authenticate git operations over SSH. Combine flags for a full
 multi-model coding workflow:
@@ -302,6 +331,19 @@ agent-tester repl \
   --workdir ~/dev/my-project \
   --pem ~/.ssh/deploy_key
 ```
+
+### Cleaning up branches
+
+Remove branches from old sessions interactively:
+
+```bash
+agent-tester cleanup               # scans CWD repo for agenttester/* branches
+agent-tester cleanup --workdir /path/to/repo
+```
+
+The command walks you through two phases — select sessions to delete entirely, then pick
+individual model branches from remaining sessions — then asks whether to delete locally,
+remotely, or both before executing.
 
 Config resolution follows the same priority as `run`: global config first, then local
 (or explicit) config, with local taking precedence on conflicts.
