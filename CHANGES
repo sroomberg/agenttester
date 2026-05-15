@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.16.0 — 2026-05-15
+- **Fix: branch negotiation runs only once per session** — the branch name is negotiated on the first prompt and reused for all subsequent prompts; no more redundant LLM calls per message
+- **`agent-tester watcher --session ID --model NAME`**: open a separate terminal window that tail-follows a model's full activity log — every prompt, tool call, tool result, and response rendered in real-time with Rich
+- **Event logging**: each model's activity is written to `~/.config/agenttester/sessions/<session-id>/events/<model>.jsonl`; structured JSONL format with type, content, and timestamp
+- **Main REPL status-only display**: instead of printing full response panels inline, the main REPL shows brief `✓ model: done` / `✗ model: error` status lines; the watcher is the rich per-model view
+
 ## v0.15.1 — 2026-05-15
 - **`agent-tester --resume <SESSION_ID>`**: resume a session without the `repl` subcommand; the exit message now shows this form instead of `repl --session`
 

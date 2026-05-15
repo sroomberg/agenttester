@@ -14,10 +14,9 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
+from .events import EventLogger
 from .git_manager import GitManager, _sanitize_ref_component
 from .loop import run_agent_loop
 from .providers import (
@@ -61,6 +60,7 @@ class Model:
     provider: Provider
     messages: list[dict] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
+    event_logger: EventLogger | None = None
 
 
 def _provider_label(m: Model) -> str:
@@ -277,16 +277,11 @@ async def _negotiate_branch_name(
 
 
 def _make_event_handler(
-    console: Console, model_name: str
+    event_logger: EventLogger | None,
 ) -> Callable[[str, str], None]:
     def on_event(event_type: str, content: str) -> None:
-        if event_type == "tool_call":
-            short = content[:100].replace("\n", " ")
-            console.print(f"  [dim]→ {model_name}: {short}[/dim]")
-        elif event_type == "tool_result":
-            short = content[:80].replace("\n", " ")
-            suffix = "…" if len(content) > 80 else ""
-            console.print(f"  [dim]← {short}{suffix}[/dim]")
+        if event_logger is not None:
+            event_logger.log(event_type, content)
 
     return on_event
 
@@ -417,6 +412,13 @@ async def run_repl(
     if seed:
         console.print("[dim]Skills loaded into context.[/dim]")
 
+    # Attach an event logger to each model so watchers can follow activity
+    import contextlib
+
+    for model in models.values():
+        with contextlib.suppress(OSError):
+            model.event_logger = EventLogger(session_name, model.name)
+
     console.print(
         "\n[dim]Commands: /reset (clear history), @model <msg> to address one model, "
         "exit or Ctrl-C to quit[/dim]\n"
@@ -428,6 +430,9 @@ async def run_repl(
         completer=_ModelCompleter(list(models)),
         history=FileHistory(str(history_file)),
     )
+
+    # Branch slug negotiated once on the first prompt; reused for the whole session.
+    _session_branch_slug: str | None = None
 
     _ctrl_c_once = False
     try:
@@ -475,20 +480,32 @@ async def run_repl(
                 prompt_text = raw
                 target_models = models
 
-            if git_mgr is not None and git_mgr.has_commits():
-                branch_slug = await _negotiate_branch_name(
-                    target_models, prompt_text, git_mgr, console
-                )
-            else:
-                branch_slug = _sanitize_ref_component(prompt_text[:60])
+            # Negotiate branch name once per session on the first prompt
+            if _session_branch_slug is None:
+                if git_mgr is not None and git_mgr.has_commits():
+                    _session_branch_slug = await _negotiate_branch_name(
+                        target_models, prompt_text, git_mgr, console
+                    )
+                else:
+                    _session_branch_slug = _sanitize_ref_component(prompt_text[:60])
+                # Record potential branch names for all models once
+                for m in models.values():
+                    branch_name = (
+                        f"agenttester/{_sanitize_ref_component(m.name)}"
+                        f"/{_session_branch_slug}"
+                    )
+                    if branch_name not in session.branches:
+                        session.branches.append(branch_name)
+
             for m in target_models.values():
                 if m.tool_executor is not None:
-                    m.tool_executor.set_branch_slug(branch_slug)
-                branch_name = (
-                    f"agenttester/{_sanitize_ref_component(m.name)}/{branch_slug}"
-                )
-                if branch_name not in session.branches:
-                    session.branches.append(branch_name)
+                    m.tool_executor.set_branch_slug(_session_branch_slug)
+
+            # Log prompt event to each model's event log
+            for _nm, m in target_models.items():
+                if m.event_logger is not None:
+                    m.event_logger.log("prompt", prompt_text)
+                    m.event_logger.log("status", f'working on "{prompt_text[:60]}"')
 
             n = len(target_models)
             label = "model" if n == 1 else "models"
@@ -497,7 +514,7 @@ async def run_repl(
 
             tasks = [
                 asyncio.create_task(
-                    _run_one(nm, m, prompt_text, _make_event_handler(console, nm))
+                    _run_one(nm, m, prompt_text, _make_event_handler(m.event_logger))
                 )
                 for nm, m in target_models.items()
             ]
@@ -505,16 +522,16 @@ async def run_repl(
             for coro in asyncio.as_completed(tasks):
                 name, reply = await coro
                 pending.remove(name)
-                console.print()
-                console.print(
-                    Panel(
-                        Markdown(reply),
-                        title=f"[bold]{name}[/bold]",
-                        border_style="blue",
-                    )
-                )
+                m = target_models[name]
+                if m.event_logger is not None:
+                    m.event_logger.log("response", reply)
+                    m.event_logger.log("status", "waiting for next instructions")
+                if reply.startswith("[error]"):
+                    console.print(f"  [red]✗ {name}[/red]: {reply[:100]}")
+                else:
+                    console.print(f"  [green]✓[/green] [bold]{name}[/bold]: done")
                 if pending:
-                    console.print(f"[dim]still waiting: {', '.join(pending)}[/dim]")
+                    console.print(f"  [dim]still working: {', '.join(pending)}[/dim]")
             console.print()
     finally:
         for name, model in models.items():

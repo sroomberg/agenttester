@@ -266,6 +266,19 @@ def repl(
 
 
 @app.command()
+def watcher(
+    session: Annotated[
+        str, typer.Option("--session", "-s", help="Session ID to watch")
+    ],
+    model: Annotated[str, typer.Option("--model", "-m", help="Model name to watch")],
+) -> None:
+    """Follow a model's live activity from a separate terminal window."""
+    from .watcher import run_watcher
+
+    run_watcher(session, model)
+
+
+@app.command()
 def serve(
     port: Annotated[
         int,
