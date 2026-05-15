@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.13.1 — 2026-05-15
+- On exit, always print `bye` from the finally block; with an active session it reads `bye  —  agent-tester repl --session <name>  to resume` on a single line
+
 ## v0.13.0 — 2026-05-15
 - **Scrollable output**: replaced `rich.Live` with plain streaming output so all model responses and tool events land in the terminal scrollback buffer and can be scrolled freely while queries are in flight
 - **Live tool event streaming**: agent tool calls and results are printed inline as they happen (`→ model: tool_name: args` / `← result`), giving real-time visibility into what each agent is doing without any blocking

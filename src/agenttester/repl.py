@@ -353,7 +353,6 @@ async def run_repl(
             try:
                 raw = await session_obj.prompt_async("> ")
             except (EOFError, KeyboardInterrupt):
-                console.print("\n[dim]bye[/dim]")
                 break
 
             raw = raw.strip()
@@ -424,5 +423,8 @@ async def run_repl(
                 session.histories[name] = list(model.messages)
             session.save()
             console.print(
-                f"[dim]agent-tester repl --session {session_name}  to resume[/dim]"
+                f"\n[dim]bye  —  agent-tester repl --session {session_name}"
+                "  to resume[/dim]"
             )
+        else:
+            console.print("\n[dim]bye[/dim]")
