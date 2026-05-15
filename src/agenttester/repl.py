@@ -10,9 +10,11 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.spinner import Spinner
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
 from .git_manager import GitManager, _sanitize_ref_component
@@ -190,6 +192,23 @@ async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
 
     results = await asyncio.gather(*[_check(m) for m in models.values()])
     return dict(zip(models.keys(), results, strict=True))
+
+
+async def _run_one(name: str, model: Model, prompt: str) -> tuple[str, str]:
+    try:
+        r = await asyncio.to_thread(_query_sync, model, prompt)
+    except Exception as exc:
+        r = str(exc)
+    return name, r
+
+
+def _live_panels(names: list[str], contents: dict) -> Group:
+    return Group(
+        *(
+            Panel(contents[n], title=f"[bold]{n}[/bold]", border_style="blue")
+            for n in names
+        )
+    )
 
 
 async def run_repl(
@@ -375,37 +394,21 @@ async def run_repl(
                         )
                     )
             else:
-                console.print(f"[dim]Querying {n} models…[/dim]")
-
-                async def _run_one(
-                    _name: str, _model: Model, _prompt: str
-                ) -> tuple[str, str]:
-                    try:
-                        r = await asyncio.to_thread(_query_sync, _model, _prompt)
-                    except Exception as exc:
-                        r = str(exc)
-                    return _name, r
-
+                names = list(target_models)
+                contents: dict = {nm: Spinner("dots") for nm in names}
                 tasks = [
                     asyncio.create_task(_run_one(nm, m, prompt_text))
                     for nm, m in target_models.items()
                 ]
-                remaining = len(tasks)
-                for done in asyncio.as_completed(tasks):
-                    name, reply = await done
-                    remaining -= 1
-                    console.print()
-                    console.print(
-                        Panel(
-                            Markdown(reply),
-                            title=f"[bold]{name}[/bold]",
-                            border_style="blue",
-                        )
-                    )
-                    if remaining > 0:
-                        console.print(
-                            f"[dim]{remaining} model(s) still responding…[/dim]"
-                        )
+                with Live(
+                    _live_panels(names, contents),
+                    refresh_per_second=10,
+                    console=console,
+                ) as live:
+                    for done in asyncio.as_completed(tasks):
+                        nm, reply = await done
+                        contents[nm] = Markdown(reply)
+                        live.update(_live_panels(names, contents))
             console.print()
     finally:
         if session:

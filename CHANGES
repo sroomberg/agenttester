@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.11.5 — 2026-05-14
+- **Live multi-model display**: when querying multiple models the REPL now renders all response panels immediately (with animated spinners), then fills each in as its model completes — built with `rich.Live` + `rich.Spinner`
+
 ## v0.11.4 — 2026-05-14
 - **Lazy branch creation**: branches are no longer created upfront at session start; a branch is created on the first `write_file` or `git_commit` call, named after the prompt that triggered it (`agenttester/<model>/<prompt-slug>`)
 - **Streaming responses**: when querying multiple models the REPL now prints each response as it arrives rather than waiting for all models to finish
