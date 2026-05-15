@@ -11,6 +11,7 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -346,7 +347,12 @@ async def run_repl(
         "exit or Ctrl-C to quit[/dim]\n"
     )
 
-    session_obj: PromptSession = PromptSession(completer=_ModelCompleter(list(models)))
+    history_file = Path.home() / ".config" / "agenttester" / "repl_history"
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    session_obj: PromptSession = PromptSession(
+        completer=_ModelCompleter(list(models)),
+        history=FileHistory(str(history_file)),
+    )
 
     _ctrl_c_once = False
     try:

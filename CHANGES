@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.13.3 — 2026-05-15
+- **Persistent prompt history**: REPL input history is saved across sessions to `~/.config/agenttester/repl_history`; up/down arrows scroll through previous prompts like a normal terminal
+
 ## v0.13.2 — 2026-05-15
 - **Double Ctrl-C to exit**: first Ctrl-C prints `(press Ctrl-C again to exit)`; second Ctrl-C exits; EOF exits immediately; any other input resets the flag
 
