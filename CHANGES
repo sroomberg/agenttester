@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.12.1 — 2026-05-15
+- On REPL exit with an active session, print `agent-tester repl --session <name>  to resume` so the user always knows how to get back
+
 ## v0.12.0 — 2026-05-14
 - **`agent-tester serve`**: new subcommand that opens an HTTP receiver (`POST /result`, `GET /health`) where external agents can POST completion results; rendered as Rich panels in real-time
 - **`notify` tool**: when `--notify-url` is passed to `agent-tester repl`, models gain a `notify` tool they can call to POST their final result back to the server; the tool is absent from the tool list when no URL is configured

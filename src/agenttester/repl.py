@@ -424,4 +424,6 @@ async def run_repl(
             for name, model in models.items():
                 session.histories[name] = list(model.messages)
             session.save()
-            console.print(f"[dim]Session saved: {session_name}[/dim]")
+            console.print(
+                f"[dim]agent-tester repl --session {session_name}  to resume[/dim]"
+            )
