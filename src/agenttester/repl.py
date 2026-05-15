@@ -141,23 +141,7 @@ def _query_sync(
     max_tokens: int = 2048,
     on_event: Callable[[str, str], None] | None = None,
 ) -> str:
-    if model.tool_executor and isinstance(
-        model.provider, (AnthropicProvider, OpenAICompatProvider)
-    ):
-        saved = list(model.messages)
-        try:
-            return run_agent_loop(
-                model.provider,
-                model.model_id,
-                model.messages,
-                prompt,
-                model.tool_executor,
-                on_event=on_event,
-            )
-        except Exception as e:
-            model.messages[:] = saved
-            return f"[error] {e}"
-
+    """Synchronous query path (Bedrock and other non-streaming providers)."""
     model.messages.append({"role": "user", "content": prompt})
     try:
         reply = model.provider.call(model.model_id, model.messages, max_tokens)
@@ -170,6 +154,60 @@ def _query_sync(
         return f"[error] {e}"
     model.messages.append({"role": "assistant", "content": reply})
     return reply
+
+
+async def _query_async(
+    model: Model,
+    prompt: str,
+    max_tokens: int = 2048,
+    on_event: Callable[[str, str], None] | None = None,
+) -> str:
+    """Async query path: uses the full streaming agent loop for OpenAI/Anthropic
+    providers; falls back to a thread for Bedrock and other sync-only providers.
+    """
+    if model.tool_executor and isinstance(
+        model.provider, (AnthropicProvider, OpenAICompatProvider)
+    ):
+        saved = list(model.messages)
+        try:
+            return await run_agent_loop(
+                model.provider,
+                model.model_id,
+                model.messages,
+                prompt,
+                model.tool_executor,
+                on_event=on_event,
+            )
+        except Exception as e:
+            model.messages[:] = saved
+            return f"[error] {e}"
+
+    if isinstance(model.provider, (AnthropicProvider, OpenAICompatProvider)):
+        # Streaming, no tool use — stream text chunks directly.
+        model.messages.append({"role": "user", "content": prompt})
+        parts: list[str] = []
+
+        def _on_chunk(chunk: str) -> None:
+            parts.append(chunk)
+            if on_event:
+                on_event("chunk", chunk)
+
+        try:
+            result = await model.provider.async_stream_raw(
+                model.model_id, model.messages, max_tokens, on_chunk=_on_chunk
+            )
+            reply = result.get("content") or "".join(parts)
+        except Exception as e:
+            model.messages.pop()
+            return f"[error] {e}"
+        model.messages.append({"role": "assistant", "content": reply})
+        return reply
+
+    # Bedrock and other sync-only providers.
+    try:
+        return await asyncio.to_thread(_query_sync, model, prompt, max_tokens, on_event)
+    except Exception as e:
+        return f"[error] {e}"
 
 
 async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
@@ -196,7 +234,7 @@ async def _run_one(
     on_event: Callable[[str, str], None] | None = None,
 ) -> tuple[str, str]:
     try:
-        r = await asyncio.to_thread(_query_sync, model, prompt, on_event=on_event)
+        r = await _query_async(model, prompt, on_event=on_event)
     except Exception as exc:
         r = str(exc)
     return name, r

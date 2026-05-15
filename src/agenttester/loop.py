@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 from .tools import ToolExecutor
 
 
-def run_agent_loop(
+async def run_agent_loop(
     provider: Any,
     model_id: str,
     messages: list[dict],
@@ -18,13 +19,13 @@ def run_agent_loop(
     max_turns: int = 20,
     on_event: Callable[[str, str], None] | None = None,
 ) -> str:
-    """Run a tool-use agent loop, mutating *messages* in place.
+    """Async tool-use agent loop, mutating *messages* in place.
 
     Appends the user message, all assistant/tool turns, and the final
     assistant response to *messages*.  Returns the final text response.
 
     on_event(type, content) is called for observability:
-        "chunk"       → streaming text chunk (may fire many times per turn)
+        "chunk"       → streaming text chunk (fires many times per turn)
         "tool_call"   → "{tool_name}: {args_json}"
         "tool_result" → tool output string
         "text"        → final assistant text (full accumulated response)
@@ -36,7 +37,7 @@ def run_agent_loop(
             on_event("chunk", chunk)
 
     for _ in range(max_turns):
-        msg = provider.stream_raw(
+        msg = await provider.async_stream_raw(
             model_id,
             messages,
             4096,
@@ -68,7 +69,7 @@ def run_agent_loop(
             if on_event:
                 on_event("tool_call", f"{tool_name}: {fn.get('arguments', '')}")
 
-            result = executor.execute(tool_name, arguments)
+            result = await asyncio.to_thread(executor.execute, tool_name, arguments)
 
             if on_event:
                 on_event("tool_result", result)

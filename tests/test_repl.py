@@ -5,7 +5,7 @@ from __future__ import annotations
 import urllib.error
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -19,6 +19,7 @@ from agenttester.providers import (
 from agenttester.repl import (
     Model,
     _ModelCompleter,
+    _query_async,
     _query_sync,
     _run_one,
     load_models,
@@ -373,33 +374,51 @@ class TestQuerySync:
         assert model.messages == []
         assert "[error]" in result
 
-    def test_tool_executor_triggers_agent_loop(self) -> None:
+    def test_no_tool_executor_uses_provider_call(self) -> None:
+        provider = MagicMock()
+        provider.call.return_value = "plain reply"
+        model = Model(name="m", model_id="llama", provider=provider)
+        result = _query_sync(model, "hi")
+        assert result == "plain reply"
+
+
+# ---------------------------------------------------------------------------
+# _query_async
+# ---------------------------------------------------------------------------
+
+
+class TestQueryAsync:
+    async def test_tool_executor_triggers_agent_loop(self) -> None:
         provider = MagicMock(spec=OpenAICompatProvider)
         executor = MagicMock(spec=ToolExecutor)
         model = Model(
             name="m", model_id="llama", provider=provider, tool_executor=executor
         )
         with patch(
-            "agenttester.repl.run_agent_loop", return_value="loop reply"
+            "agenttester.repl.run_agent_loop",
+            new_callable=AsyncMock,
+            return_value="loop reply",
         ) as mock_loop:
-            result = _query_sync(model, "do it")
+            result = await _query_async(model, "do it")
         mock_loop.assert_called_once()
         assert result == "loop reply"
 
-    def test_anthropic_provider_triggers_agent_loop(self) -> None:
+    async def test_anthropic_provider_triggers_agent_loop(self) -> None:
         provider = MagicMock(spec=AnthropicProvider)
         executor = MagicMock(spec=ToolExecutor)
         model = Model(
             name="m", model_id="claude", provider=provider, tool_executor=executor
         )
         with patch(
-            "agenttester.repl.run_agent_loop", return_value="loop reply"
+            "agenttester.repl.run_agent_loop",
+            new_callable=AsyncMock,
+            return_value="loop reply",
         ) as mock_loop:
-            result = _query_sync(model, "do it")
+            result = await _query_async(model, "do it")
         mock_loop.assert_called_once()
         assert result == "loop reply"
 
-    def test_tool_executor_error_restores_messages(self) -> None:
+    async def test_tool_executor_error_restores_messages(self) -> None:
         provider = MagicMock(spec=OpenAICompatProvider)
         executor = MagicMock(spec=ToolExecutor)
         model = Model(
@@ -409,19 +428,24 @@ class TestQuerySync:
             tool_executor=executor,
             messages=[{"role": "system", "content": "seed"}],
         )
-        with patch("agenttester.repl.run_agent_loop", side_effect=RuntimeError("boom")):
-            result = _query_sync(model, "do it")
+        with patch(
+            "agenttester.repl.run_agent_loop",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ):
+            result = await _query_async(model, "do it")
         assert model.messages == [{"role": "system", "content": "seed"}]
         assert "[error]" in result
 
-    def test_no_tool_executor_uses_provider_call(self) -> None:
+    async def test_openai_provider_uses_async_stream_raw(self) -> None:
         provider = MagicMock(spec=OpenAICompatProvider)
-        provider.call.return_value = "plain reply"
+        provider.async_stream_raw = AsyncMock(
+            return_value={"content": "streamed reply", "tool_calls": None}
+        )
         model = Model(name="m", model_id="llama", provider=provider)
-        with patch("agenttester.repl.run_agent_loop") as mock_loop:
-            result = _query_sync(model, "hi")
-        mock_loop.assert_not_called()
-        assert result == "plain reply"
+        result = await _query_async(model, "hi")
+        provider.async_stream_raw.assert_called_once()
+        assert result == "streamed reply"
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +551,11 @@ class TestRunReplSkillSeeding:
             patch("agenttester.repl.load_skills", return_value="do the thing"),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls2,
-            patch("agenttester.repl._query_sync", side_effect=capture2),
+            patch(
+                "agenttester.repl._query_async",
+                new_callable=AsyncMock,
+                side_effect=capture2,
+            ),
             patch(
                 "agenttester.session._default_sessions_dir",
                 return_value=tmp_path / "sessions",
@@ -559,7 +587,11 @@ class TestRunReplSkillSeeding:
             patch("agenttester.repl.load_skills", return_value=""),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
-            patch("agenttester.repl._query_sync", side_effect=capture),
+            patch(
+                "agenttester.repl._query_async",
+                new_callable=AsyncMock,
+                side_effect=capture,
+            ),
             patch(
                 "agenttester.session._default_sessions_dir",
                 return_value=tmp_path / "sessions",
@@ -591,7 +623,11 @@ class TestRunReplSkillSeeding:
             patch("agenttester.repl.load_skills", return_value="skill context"),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
-            patch("agenttester.repl._query_sync", side_effect=capture),
+            patch(
+                "agenttester.repl._query_async",
+                new_callable=AsyncMock,
+                side_effect=capture,
+            ),
             patch(
                 "agenttester.session._default_sessions_dir",
                 return_value=tmp_path / "sessions",
@@ -663,7 +699,11 @@ class TestRunReplSession:
             patch("agenttester.repl.load_skills", return_value=""),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
-            patch("agenttester.repl._query_sync", side_effect=capture_query),
+            patch(
+                "agenttester.repl._query_async",
+                new_callable=AsyncMock,
+                side_effect=capture_query,
+            ),
             patch(
                 "agenttester.session._default_sessions_dir",
                 return_value=sessions_dir,
