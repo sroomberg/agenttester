@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.13.0 — 2026-05-15
+- **Scrollable output**: replaced `rich.Live` with plain streaming output so all model responses and tool events land in the terminal scrollback buffer and can be scrolled freely while queries are in flight
+- **Live tool event streaming**: agent tool calls and results are printed inline as they happen (`→ model: tool_name: args` / `← result`), giving real-time visibility into what each agent is doing without any blocking
+- **Unified query path**: single/multi-model queries now share the same `asyncio.as_completed` path; a "still waiting: …" line after each response shows which models are still running
+
 ## v0.12.1 — 2026-05-15
 - On REPL exit with an active session, print `agent-tester repl --session <name>  to resume` so the user always knows how to get back
 

@@ -19,8 +19,8 @@ from agenttester.providers import (
 from agenttester.repl import (
     Model,
     _ModelCompleter,
-    _query_all,
     _query_sync,
+    _run_one,
     load_models,
     run_repl,
 )
@@ -425,27 +425,26 @@ class TestQuerySync:
 
 
 # ---------------------------------------------------------------------------
-# _query_all
+# _run_one
 # ---------------------------------------------------------------------------
 
 
-class TestQueryAll:
-    async def test_queries_all_models(self) -> None:
-        def _make(name: str) -> Model:
-            provider = MagicMock()
-            provider.call.return_value = "ok"
-            return Model(name=name, model_id="llama", provider=provider)
-
-        models = {"llama3": _make("llama3"), "mistral": _make("mistral")}
-        results = await _query_all(models, "hello")
-        assert set(results.keys()) == {"llama3", "mistral"}
+class TestRunOne:
+    async def test_returns_name_and_result(self) -> None:
+        provider = MagicMock()
+        provider.call.return_value = "ok"
+        model = Model(name="llama3", model_id="llama", provider=provider)
+        name, result = await _run_one("llama3", model, "hello")
+        assert name == "llama3"
+        assert result == "ok"
 
     async def test_returns_error_string_on_exception(self) -> None:
         provider = MagicMock()
         provider.call.side_effect = OSError("unreachable")
-        models = {"llama3": Model(name="llama3", model_id="llama", provider=provider)}
-        results = await _query_all(models, "hello")
-        assert "[error]" in results["llama3"]
+        model = Model(name="llama3", model_id="llama", provider=provider)
+        name, result = await _run_one("llama3", model, "hello")
+        assert name == "llama3"
+        assert "[error]" in result
 
 
 # ---------------------------------------------------------------------------
@@ -507,14 +506,7 @@ class TestRunReplSkillSeeding:
         ):
             mock_session = mock_session_cls.return_value
             mock_session.prompt_async = fake_prompt
-            captured: list[dict] = []
-
-            async def capture_query(models, prompt):
-                captured.extend(next(iter(models.values())).messages)
-                return {"m": "ok"}
-
-            with patch("agenttester.repl._query_all", side_effect=capture_query):
-                await run_repl(cfg)
+            await run_repl(cfg)
 
         inputs2 = iter(["hello", "exit"])
 
@@ -523,15 +515,15 @@ class TestRunReplSkillSeeding:
 
         seen: list[dict] = []
 
-        async def capture2(models, prompt):
-            seen.extend(next(iter(models.values())).messages)
-            return {"m": "ok"}
+        def capture2(model, prompt, **_kw):
+            seen.extend(model.messages)
+            return "ok"
 
         with (
             patch("agenttester.repl.load_skills", return_value="do the thing"),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls2,
-            patch("agenttester.repl._query_all", side_effect=capture2),
+            patch("agenttester.repl._query_sync", side_effect=capture2),
         ):
             mock_session2 = mock_session_cls2.return_value
             mock_session2.prompt_async = fake_prompt2
@@ -551,15 +543,15 @@ class TestRunReplSkillSeeding:
 
         pre_query_messages: list[dict] = []
 
-        async def capture(models, prompt):
-            pre_query_messages.extend(next(iter(models.values())).messages)
-            return {"m": "ok"}
+        def capture(model, prompt, **_kw):
+            pre_query_messages.extend(model.messages)
+            return "ok"
 
         with (
             patch("agenttester.repl.load_skills", return_value=""),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
-            patch("agenttester.repl._query_all", side_effect=capture),
+            patch("agenttester.repl._query_sync", side_effect=capture),
         ):
             mock_session = mock_session_cls.return_value
             mock_session.prompt_async = fake_prompt
@@ -579,18 +571,15 @@ class TestRunReplSkillSeeding:
 
         snapshots: list[list[dict]] = []
 
-        async def capture(models, prompt):
-            m = next(iter(models.values()))
-            snapshots.append(list(m.messages))
-            m.messages.append({"role": "user", "content": prompt})
-            m.messages.append({"role": "assistant", "content": "ok"})
-            return {"m": "ok"}
+        def capture(model, prompt, **_kw):
+            snapshots.append(list(model.messages))
+            return "ok"
 
         with (
             patch("agenttester.repl.load_skills", return_value="skill context"),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
-            patch("agenttester.repl._query_all", side_effect=capture),
+            patch("agenttester.repl._query_sync", side_effect=capture),
         ):
             mock_session = mock_session_cls.return_value
             mock_session.prompt_async = fake_prompt
@@ -650,15 +639,15 @@ class TestRunReplSession:
         async def fake_prompt(*_a, **_kw):
             return next(inputs)
 
-        async def capture_query(models, prompt):
-            captured.append(list(next(iter(models.values())).messages))
-            return {"m": "ok"}
+        def capture_query(model, prompt, **_kw):
+            captured.append(list(model.messages))
+            return "ok"
 
         with (
             patch("agenttester.repl.load_skills", return_value=""),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
-            patch("agenttester.repl._query_all", side_effect=capture_query),
+            patch("agenttester.repl._query_sync", side_effect=capture_query),
             patch(
                 "agenttester.session._default_sessions_dir",
                 return_value=sessions_dir,

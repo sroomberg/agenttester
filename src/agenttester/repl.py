@@ -5,16 +5,15 @@ from __future__ import annotations
 import asyncio
 import re
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
-from rich.console import Console, Group
-from rich.live import Live
+from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.spinner import Spinner
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
 from .git_manager import GitManager, _sanitize_ref_component
@@ -134,7 +133,12 @@ def load_models(config_path: Path | None = None) -> dict[str, Model]:
     return models
 
 
-def _query_sync(model: Model, prompt: str, max_tokens: int = 2048) -> str:
+def _query_sync(
+    model: Model,
+    prompt: str,
+    max_tokens: int = 2048,
+    on_event: Callable[[str, str], None] | None = None,
+) -> str:
     if model.tool_executor and isinstance(
         model.provider, (AnthropicProvider, OpenAICompatProvider)
     ):
@@ -146,6 +150,7 @@ def _query_sync(model: Model, prompt: str, max_tokens: int = 2048) -> str:
                 model.messages,
                 prompt,
                 model.tool_executor,
+                on_event=on_event,
             )
         except Exception as e:
             model.messages[:] = saved
@@ -165,18 +170,6 @@ def _query_sync(model: Model, prompt: str, max_tokens: int = 2048) -> str:
     return reply
 
 
-async def _query_all(models: dict[str, Model], prompt: str) -> dict[str, str]:
-    tasks = {
-        name: asyncio.to_thread(_query_sync, model, prompt)
-        for name, model in models.items()
-    }
-    results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-    return {
-        name: str(r) if isinstance(r, Exception) else r
-        for name, r in zip(tasks.keys(), results, strict=True)
-    }
-
-
 async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
     """Check reachable state in parallel.
 
@@ -194,21 +187,32 @@ async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
     return dict(zip(models.keys(), results, strict=True))
 
 
-async def _run_one(name: str, model: Model, prompt: str) -> tuple[str, str]:
+async def _run_one(
+    name: str,
+    model: Model,
+    prompt: str,
+    on_event: Callable[[str, str], None] | None = None,
+) -> tuple[str, str]:
     try:
-        r = await asyncio.to_thread(_query_sync, model, prompt)
+        r = await asyncio.to_thread(_query_sync, model, prompt, on_event=on_event)
     except Exception as exc:
         r = str(exc)
     return name, r
 
 
-def _live_panels(names: list[str], contents: dict) -> Group:
-    return Group(
-        *(
-            Panel(contents[n], title=f"[bold]{n}[/bold]", border_style="blue")
-            for n in names
-        )
-    )
+def _make_event_handler(
+    console: Console, model_name: str
+) -> Callable[[str, str], None]:
+    def on_event(event_type: str, content: str) -> None:
+        if event_type == "tool_call":
+            short = content[:100].replace("\n", " ")
+            console.print(f"  [dim]→ {model_name}: {short}[/dim]")
+        elif event_type == "tool_result":
+            short = content[:80].replace("\n", " ")
+            suffix = "…" if len(content) > 80 else ""
+            console.print(f"  [dim]← {short}{suffix}[/dim]")
+
+    return on_event
 
 
 async def run_repl(
@@ -390,34 +394,29 @@ async def run_repl(
 
             n = len(target_models)
             label = "model" if n == 1 else "models"
-            if n == 1:
-                with console.status(f"[dim]Querying {label}…[/dim]"):
-                    responses = await _query_all(target_models, prompt_text)
+            model_list = ", ".join(target_models)
+            console.print(f"[dim]Querying {n} {label}: {model_list}…[/dim]")
+
+            tasks = [
+                asyncio.create_task(
+                    _run_one(nm, m, prompt_text, _make_event_handler(console, nm))
+                )
+                for nm, m in target_models.items()
+            ]
+            pending = list(target_models)
+            for coro in asyncio.as_completed(tasks):
+                name, reply = await coro
+                pending.remove(name)
                 console.print()
-                for name, reply in responses.items():
-                    console.print(
-                        Panel(
-                            Markdown(reply),
-                            title=f"[bold]{name}[/bold]",
-                            border_style="blue",
-                        )
+                console.print(
+                    Panel(
+                        Markdown(reply),
+                        title=f"[bold]{name}[/bold]",
+                        border_style="blue",
                     )
-            else:
-                names = list(target_models)
-                contents: dict = {nm: Spinner("dots") for nm in names}
-                tasks = [
-                    asyncio.create_task(_run_one(nm, m, prompt_text))
-                    for nm, m in target_models.items()
-                ]
-                with Live(
-                    _live_panels(names, contents),
-                    refresh_per_second=10,
-                    console=console,
-                ) as live:
-                    for done in asyncio.as_completed(tasks):
-                        nm, reply = await done
-                        contents[nm] = Markdown(reply)
-                        live.update(_live_panels(names, contents))
+                )
+                if pending:
+                    console.print(f"[dim]still waiting: {', '.join(pending)}[/dim]")
             console.print()
     finally:
         if session:
