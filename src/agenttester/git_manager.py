@@ -199,6 +199,35 @@ class GitManager:
         except GitCommandError:
             return ""
 
+    def cleanup_if_empty(self, agent_name: str, run_name: str) -> bool:
+        """Remove the worktree and branch if no commits were made to the branch.
+
+        A branch is considered empty when it has no commits that are not
+        already reachable from HEAD (i.e. no work was done).
+
+        Returns True if the branch was cleaned up, False if it was kept.
+        """
+        safe_agent = _sanitize_ref_component(agent_name)
+        safe_run = _sanitize_ref_component(run_name)
+        branch = f"agenttester/{safe_agent}/{safe_run}"
+        worktree_path = self.worktree_base / safe_run / safe_agent
+
+        try:
+            count = int(self.repo.git.rev_list(f"HEAD..{branch}", "--count"))
+        except GitCommandError:
+            return False  # branch doesn't exist or git error — leave as-is
+
+        if count > 0:
+            return False  # branch has commits; keep it
+
+        with contextlib.suppress(GitCommandError):
+            self.repo.git.worktree("remove", str(worktree_path), "--force")
+        with contextlib.suppress(OSError):
+            worktree_path.parent.rmdir()
+        with contextlib.suppress(GitCommandError):
+            self.repo.git.branch("-d", branch)
+        return True
+
     def cleanup_worktree(self, run_name: str, agent_name: str) -> None:
         """Remove a single worktree."""
         worktree_path = self.worktree_base / run_name / agent_name

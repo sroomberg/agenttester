@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.4 — 2026-05-14
+- **Lazy branch creation**: branches are no longer created upfront at session start; a branch is created on the first `write_file` or `git_commit` call, named after the prompt that triggered it (`agenttester/<model>/<prompt-slug>`)
+- **Streaming responses**: when querying multiple models the REPL now prints each response as it arrives rather than waiting for all models to finish
+- **git.md skill**: updated branch format docs to reflect prompt-derived names; added a "Merge conflicts" section instructing agents to resolve conflicts automatically
+
 ## v0.11.3 — 2026-05-14
 - **Cost package refactor**: `cost.py` split into `cost/` package (`base.py` — `CostEntry` + `CostBackend` ABC, `local.py` — `LocalCostBackend`, `tracker.py` — `CostTracker`); all existing imports unchanged
 

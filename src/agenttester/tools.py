@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 _MAX_OUTPUT_BYTES = 8192
@@ -144,9 +145,34 @@ def _truncate(output: str, max_bytes: int = _MAX_OUTPUT_BYTES) -> str:
 class ToolExecutor:
     """Executes tools on behalf of a model agent."""
 
-    def __init__(self, workdir: str = ".", pem_path: str | None = None) -> None:
+    def __init__(
+        self,
+        workdir: str = ".",
+        pem_path: str | None = None,
+        worktree_creator: Callable[[str], Path] | None = None,
+    ) -> None:
         self.workdir = str(Path(workdir).resolve())
         self.pem_path = pem_path
+        self._worktree_creator = worktree_creator
+        self._branch_slug: str | None = None
+        self._worktree_created = False
+
+    def set_branch_slug(self, slug: str) -> None:
+        """Set the branch slug to use on the next write, if no worktree yet."""
+        if not self._worktree_created:
+            self._branch_slug = slug
+
+    def _ensure_worktree(self) -> None:
+        """Create the worktree on the first write operation."""
+        if (
+            self._worktree_created
+            or not self._worktree_creator
+            or not self._branch_slug
+        ):
+            return
+        wt_path = self._worktree_creator(self._branch_slug)
+        self.workdir = str(wt_path)
+        self._worktree_created = True
 
     def execute(self, tool_name: str, arguments: dict) -> str:
         dispatch = {
@@ -214,6 +240,7 @@ class ToolExecutor:
             return f"Error: {e}"
 
     def _tool_write_file(self, path: str, content: str) -> str:
+        self._ensure_worktree()
         p = Path(path) if Path(path).is_absolute() else Path(self.workdir) / path
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -233,6 +260,7 @@ class ToolExecutor:
         return self._run(cmd, extra_env=self._git_env())
 
     def _tool_git_commit(self, message: str) -> str:
+        self._ensure_worktree()
         add = self._run(["git", "add", "-A"])
         if add.startswith("Error"):
             return add

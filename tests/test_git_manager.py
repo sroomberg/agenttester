@@ -111,6 +111,33 @@ class TestGetOrCreateWorktree:
         assert wt2.exists()
 
 
+class TestCleanupIfEmpty:
+    def test_removes_empty_branch_and_worktree(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        wt = gm.get_or_create_worktree("agent1", "sess-empty")
+        assert wt.exists()
+        cleaned = gm.cleanup_if_empty("agent1", "sess-empty")
+        assert cleaned is True
+        assert not wt.exists()
+        repo = git.Repo(tmp_git_repo)
+        branch_names = [b.name for b in repo.branches]
+        assert "agenttester/agent1/sess-empty" not in branch_names
+
+    def test_keeps_branch_with_commits(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        wt = gm.get_or_create_worktree("agent1", "sess-with-commits")
+        (wt / "work.txt").write_text("some work")
+        gm.commit_all(wt, "agent1")
+        cleaned = gm.cleanup_if_empty("agent1", "sess-with-commits")
+        assert cleaned is False
+        assert wt.exists()
+
+    def test_returns_false_for_nonexistent_branch(self, tmp_git_repo: Path) -> None:
+        gm = GitManager(tmp_git_repo)
+        cleaned = gm.cleanup_if_empty("ghost", "no-such-session")
+        assert cleaned is False
+
+
 class TestPushBranch:
     def test_calls_git_push_with_correct_branch(self, tmp_git_repo: Path) -> None:
         gm = GitManager(tmp_git_repo)

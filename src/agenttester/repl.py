@@ -6,7 +6,6 @@ import asyncio
 import re
 import urllib.error
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -16,7 +15,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
-from .git_manager import GitManager
+from .git_manager import GitManager, _sanitize_ref_component
 from .loop import run_agent_loop
 from .providers import (
     AnthropicProvider,
@@ -193,25 +192,6 @@ async def _check_connections(models: dict[str, Model]) -> dict[str, bool]:
     return dict(zip(models.keys(), results, strict=True))
 
 
-def _setup_worktrees(
-    models: dict[str, Model],
-    git_mgr: GitManager,
-    run_name: str,
-    pem_path: str | None,
-    console: Console,
-) -> None:
-    """Create or reattach a worktree per model and assign a ToolExecutor."""
-    for model in models.values():
-        try:
-            wt_path = git_mgr.get_or_create_worktree(model.name, run_name)
-            model.tool_executor = ToolExecutor(workdir=str(wt_path), pem_path=pem_path)
-            console.print(f"  [dim]branch:[/dim] agenttester/{model.name}/{run_name}")
-        except Exception as e:
-            console.print(
-                f"  [yellow]Could not create worktree for {model.name}: {e}[/yellow]"
-            )
-
-
 async def run_repl(
     config_path: Path | None = None,
     skip_checks: bool = False,
@@ -273,14 +253,28 @@ async def run_repl(
 
     # Worktree + tool use setup — defaults to CWD so branches land in the
     # repo the REPL is invoked from when --workdir is not explicitly given.
-    run_name = session_name or datetime.now().strftime("repl-%Y%m%d-%H%M%S")
     workdir_path = Path(workdir).resolve() if workdir else Path.cwd()
+    git_mgr: GitManager | None = None
     try:
         git_mgr = GitManager(workdir_path)
         if git_mgr.has_commits():
-            console.print(f"\n[dim]Setting up worktrees in {workdir_path}…[/dim]")
-            _setup_worktrees(models, git_mgr, run_name, pem_path, console)
+            console.print(
+                f"\n[dim]Tools active in {workdir_path};"
+                " branches created on first write.[/dim]"
+            )
+            for model in models.values():
+                mn = model.name
+                model.tool_executor = ToolExecutor(
+                    workdir=str(workdir_path),
+                    pem_path=pem_path,
+                    worktree_creator=(
+                        lambda slug, _gm=git_mgr, _mn=mn: _gm.get_or_create_worktree(
+                            _mn, slug
+                        )
+                    ),
+                )
         else:
+            git_mgr = None
             console.print(
                 "[yellow]workdir has no commits; "
                 "tools enabled but no branches.[/yellow]"
@@ -290,6 +284,7 @@ async def run_repl(
                     workdir=str(workdir_path), pem_path=pem_path
                 )
     except Exception:
+        git_mgr = None
         if workdir:
             console.print(
                 f"[yellow]{workdir} is not a git repo; "
@@ -360,19 +355,57 @@ async def run_repl(
                 prompt_text = raw
                 target_models = models
 
+            branch_slug = _sanitize_ref_component(prompt_text[:60])
+            for m in target_models.values():
+                if m.tool_executor is not None:
+                    m.tool_executor.set_branch_slug(branch_slug)
+
             n = len(target_models)
             label = "model" if n == 1 else "models"
-            with console.status(f"[dim]Querying {n} {label}…[/dim]"):
-                responses = await _query_all(target_models, prompt_text)
-            console.print()
-            for name, reply in responses.items():
-                console.print(
-                    Panel(
-                        Markdown(reply),
-                        title=f"[bold]{name}[/bold]",
-                        border_style="blue",
+            if n == 1:
+                with console.status(f"[dim]Querying {label}…[/dim]"):
+                    responses = await _query_all(target_models, prompt_text)
+                console.print()
+                for name, reply in responses.items():
+                    console.print(
+                        Panel(
+                            Markdown(reply),
+                            title=f"[bold]{name}[/bold]",
+                            border_style="blue",
+                        )
                     )
-                )
+            else:
+                console.print(f"[dim]Querying {n} models…[/dim]")
+
+                async def _run_one(
+                    _name: str, _model: Model, _prompt: str
+                ) -> tuple[str, str]:
+                    try:
+                        r = await asyncio.to_thread(_query_sync, _model, _prompt)
+                    except Exception as exc:
+                        r = str(exc)
+                    return _name, r
+
+                tasks = [
+                    asyncio.create_task(_run_one(nm, m, prompt_text))
+                    for nm, m in target_models.items()
+                ]
+                remaining = len(tasks)
+                for done in asyncio.as_completed(tasks):
+                    name, reply = await done
+                    remaining -= 1
+                    console.print()
+                    console.print(
+                        Panel(
+                            Markdown(reply),
+                            title=f"[bold]{name}[/bold]",
+                            border_style="blue",
+                        )
+                    )
+                    if remaining > 0:
+                        console.print(
+                            f"[dim]{remaining} model(s) still responding…[/dim]"
+                        )
             console.print()
     finally:
         if session:
