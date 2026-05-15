@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.13.2 — 2026-05-15
+- **Double Ctrl-C to exit**: first Ctrl-C prints `(press Ctrl-C again to exit)`; second Ctrl-C exits; EOF exits immediately; any other input resets the flag
+
 ## v0.13.1 — 2026-05-15
 - On exit, always print `bye` from the finally block; with an active session it reads `bye  —  agent-tester repl --session <name>  to resume` on a single line
 

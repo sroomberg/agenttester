@@ -348,11 +348,19 @@ async def run_repl(
 
     session_obj: PromptSession = PromptSession(completer=_ModelCompleter(list(models)))
 
+    _ctrl_c_once = False
     try:
         while True:
             try:
                 raw = await session_obj.prompt_async("> ")
-            except (EOFError, KeyboardInterrupt):
+                _ctrl_c_once = False
+            except KeyboardInterrupt:
+                if _ctrl_c_once:
+                    break
+                _ctrl_c_once = True
+                console.print("[dim](press Ctrl-C again to exit)[/dim]")
+                continue
+            except EOFError:
                 break
 
             raw = raw.strip()
