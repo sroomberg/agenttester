@@ -202,6 +202,80 @@ async def _run_one(
     return name, r
 
 
+def _clean_name(raw: str) -> str:
+    """Extract and sanitize a branch-name token from a model reply."""
+    line = raw.strip().split("\n")[0].strip().strip("`\"' ")
+    token = line.split()[0] if line.split() else ""
+    return _sanitize_ref_component(token.lower()[:60])
+
+
+def _best_name(names: list[str]) -> str:
+    """Return the shortest name that has at least 2 kebab components."""
+    valid = [n for n in names if n and len(n.split("-")) >= 2]
+    pool = valid or [n for n in names if n]
+    return min(pool, key=len) if pool else "unnamed"
+
+
+async def _gather_names(models: dict[str, Model], user_prompt: str) -> dict[str, str]:
+    """Query all models for a branch name proposal without touching their histories."""
+
+    async def _one(name: str, model: Model) -> tuple[str, str]:
+        msgs = [{"role": "user", "content": user_prompt}]
+        try:
+            reply = await asyncio.to_thread(
+                model.provider.call, model.model_id, msgs, 64
+            )
+            return name, _clean_name(reply)
+        except Exception:
+            return name, ""
+
+    results = await asyncio.gather(*[_one(nm, m) for nm, m in models.items()])
+    return {nm: name for nm, name in results if name}
+
+
+async def _negotiate_branch_name(
+    models: dict[str, Model],
+    prompt: str,
+    git_mgr: GitManager,
+    console: Console,
+) -> str:
+    """Negotiate a branch name across all models (max 2 rounds).
+
+    Returns ``<short-hash>-<feature-name>``.
+    """
+    short_hash = git_mgr.short_head_hash()
+    naming_instruction = (
+        "Reply with ONLY a short kebab-case git branch name (2-5 words, no slashes "
+        "or prefixes) describing the following task. Nothing else."
+    )
+    round1_prompt = f"{naming_instruction}\n\nTask: {prompt}"
+
+    console.print("[dim]Negotiating branch name…[/dim]")
+
+    proposals = await _gather_names(models, round1_prompt)
+    for nm, name in proposals.items():
+        console.print(f"  [dim]round 1 · {nm}: {name}[/dim]")
+
+    unique = set(proposals.values())
+    if len(unique) == 1 or len(models) == 1:
+        feature = _best_name(list(proposals.values()))
+    else:
+        proposal_lines = "\n".join(f"- {nm}: {p}" for nm, p in proposals.items())
+        round2_prompt = (
+            f"{naming_instruction}\n\nTask: {prompt}\n\n"
+            f"Other models proposed:\n{proposal_lines}\n\n"
+            "Pick the most descriptive one or propose a better alternative."
+        )
+        proposals2 = await _gather_names(models, round2_prompt)
+        for nm, name in proposals2.items():
+            console.print(f"  [dim]round 2 · {nm}: {name}[/dim]")
+        feature = _best_name(list(proposals2.values()))
+
+    slug = f"{short_hash}-{feature}"
+    console.print(f"  [dim]→ {slug}[/dim]")
+    return slug
+
+
 def _make_event_handler(
     console: Console, model_name: str
 ) -> Callable[[str, str], None]:
@@ -401,7 +475,12 @@ async def run_repl(
                 prompt_text = raw
                 target_models = models
 
-            branch_slug = _sanitize_ref_component(prompt_text[:60])
+            if git_mgr is not None and git_mgr.has_commits():
+                branch_slug = await _negotiate_branch_name(
+                    target_models, prompt_text, git_mgr, console
+                )
+            else:
+                branch_slug = _sanitize_ref_component(prompt_text[:60])
             for m in target_models.values():
                 if m.tool_executor is not None:
                     m.tool_executor.set_branch_slug(branch_slug)

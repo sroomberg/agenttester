@@ -68,6 +68,10 @@ class GitManager:
         """Return the current HEAD commit SHA."""
         return self.repo.head.commit.hexsha
 
+    def short_head_hash(self) -> str:
+        """Return the first 8 characters of the HEAD commit SHA."""
+        return self.repo.head.commit.hexsha[:8]
+
     def pull_from_remote(self) -> bool:
         """Pull latest changes from origin.
 

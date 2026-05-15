@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.14.0 — 2026-05-15
+- **Negotiated branch names**: before coding begins, all models vote on a branch name in up to 2 rounds; after round 2 the shortest descriptive proposal wins; the final slug is prefixed with the HEAD commit hash (`<8-char-hash>-<feature-name>`)
+- Branch negotiation is skipped when there is no git repo or no commits (falls back to prompt slug)
+
 ## v0.13.5 — 2026-05-15
 - Auto-generated session names use UUID4 instead of a datetime string
 
