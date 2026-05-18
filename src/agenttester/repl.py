@@ -481,6 +481,7 @@ async def run_repl(
 
     # Background tasks for model runs — kept alive across prompt iterations
     _background_tasks: set[asyncio.Task] = set()
+    _busy_models: set[str] = set()
     _shutting_down = False
 
     def _toolbar() -> HTML:
@@ -535,6 +536,21 @@ async def run_repl(
                 for model in models.values():
                     model.messages = list(seed)
                 console.print("[dim]Context cleared.[/dim]\n")
+                continue
+            if raw == "/status":
+                _background_tasks -= {t for t in _background_tasks if t.done()}
+                running = len(_background_tasks)
+                pending_qs = question_registry.pending()
+                if not running and not pending_qs:
+                    console.print("[dim]All models idle.[/dim]\n")
+                else:
+                    if running:
+                        console.print(f"[dim]{running} model(s) running[/dim]")
+                    for q in pending_qs:
+                        console.print(
+                            f"  [yellow]⏸ {q.model_name}[/yellow]: {q.question[:80]}"
+                        )
+                    console.print()
                 continue
 
             if raw.startswith("/reply "):
@@ -602,6 +618,23 @@ async def run_repl(
                 if m.tool_executor is not None:
                     m.tool_executor.set_branch_slug(_session_branch_slug)
 
+            # Filter out busy models
+            busy_in_target = {nm for nm in target_models if nm in _busy_models}
+            if busy_in_target:
+                console.print(
+                    f"[yellow]Skipping busy model(s): "
+                    f"{', '.join(busy_in_target)}[/yellow]"
+                )
+                target_models = {
+                    nm: m for nm, m in target_models.items() if nm not in busy_in_target
+                }
+            if not target_models:
+                console.print(
+                    "[yellow]All target models are busy. Use /reply "
+                    "or wait for them to finish.[/yellow]\n"
+                )
+                continue
+
             # Log prompt event to each model's event log
             for _nm, m in target_models.items():
                 if m.event_logger is not None:
@@ -620,6 +653,7 @@ async def run_repl(
                     _m: Model = m,
                     _prompt: str = prompt_text,
                 ) -> None:
+                    _busy_models.add(_nm)
                     try:
                         _, reply = await _run_one(
                             _nm,
@@ -632,6 +666,8 @@ async def run_repl(
                         if _m.event_logger is not None:
                             _m.event_logger.log("status", "stopped")
                         return
+                    finally:
+                        _busy_models.discard(_nm)
                     if _m.event_logger is not None:
                         _m.event_logger.log("response", reply)
                         _m.event_logger.log("status", "waiting for next instructions")

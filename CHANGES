@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.18.1 — 2026-05-18
+- Prevent sending prompts to busy models; REPL now rejects `/send` to a model that is already running
+- `/status` command shows running, waiting, and idle models
+
 ## v0.18.0 — 2026-05-18
 - **Fix: streaming responses no longer cut off**: SSE parsing now uses line-based reading (`readline()`) instead of iterating over raw byte chunks, preventing data loss when chunk boundaries split SSE events mid-line; a JSON buffer accumulates partial payloads across lines
 - **`ask_user` tool**: models can now pause execution and wait for user input; when a model calls `ask_user`, the main REPL displays a status line showing how many models are waiting and their names; use `/reply @model <response>` to send a response
