@@ -505,9 +505,15 @@ async def run_repl(
     _background_tasks: set[asyncio.Task] = set()
     _busy_models: set[str] = set()
     _shutting_down = False
+    _ctrl_c_at: float | None = None
+    _ctrl_c_clear_task: asyncio.Task | None = None
 
     def _toolbar() -> HTML:
         """Dynamic bottom toolbar showing counts only."""
+        import time
+
+        if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < 2.0:
+            return HTML("<ansired>Press Ctrl-C to exit</ansired>")
         waiting_names = {q.model_name for q in question_registry.pending()}
         n_running = len(_busy_models - waiting_names)
         n_waiting = len(waiting_names)
@@ -526,7 +532,14 @@ async def run_repl(
         bottom_toolbar=_toolbar,
     )
 
-    _ctrl_c_at: float | None = None
+    async def _clear_ctrl_c_after_delay() -> None:
+        nonlocal _ctrl_c_at, _ctrl_c_clear_task
+        await asyncio.sleep(2.0)
+        _ctrl_c_at = None
+        _ctrl_c_clear_task = None
+        with contextlib.suppress(Exception):
+            session_obj.app.invalidate()
+
     _stdout_ctx = patch_stdout(raw=True)
     _stdout_ctx.__enter__()
     try:
@@ -543,8 +556,10 @@ async def run_repl(
                 now = time.monotonic()
                 if _ctrl_c_at is not None and (now - _ctrl_c_at) < 2.0:
                     break
+                if _ctrl_c_clear_task is not None:
+                    _ctrl_c_clear_task.cancel()
                 _ctrl_c_at = now
-                console.print("[dim](press Ctrl-C again within 2s to exit)[/dim]")
+                _ctrl_c_clear_task = asyncio.create_task(_clear_ctrl_c_after_delay())
                 continue
             except EOFError:
                 break

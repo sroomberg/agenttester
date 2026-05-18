@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.18.5 — 2026-05-18
+- Ctrl-C shows "Press Ctrl-C to exit" in the toolbar instead of printing; message disappears automatically after 2s
+
 ## v0.18.4 — 2026-05-18
 - Typing `/` in the REPL shows a completion dropdown for all slash commands with descriptions
 
