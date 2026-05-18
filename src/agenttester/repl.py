@@ -38,12 +38,34 @@ _COMMAND_PATTERN = re.compile(
 _AT_PATTERN = re.compile(r"^@(\S*)$|^@(\S+)\s")
 
 
+_SLASH_COMMANDS = [
+    ("/reset", "clear conversation history"),
+    ("/status", "show running/waiting/idle models"),
+    ("/reply", "send a response to a waiting model"),
+]
+
+
 class _ModelCompleter(Completer):
     def __init__(self, model_names: list[str]) -> None:
         self._names = model_names
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
+
+        # Slash-command completion: only at the start of input
+        if text.startswith("/") and " " not in text:
+            partial = text[1:]
+            for cmd, meta in _SLASH_COMMANDS:
+                if cmd[1:].startswith(partial):
+                    yield Completion(
+                        cmd[1:],
+                        start_position=-len(partial),
+                        display=cmd,
+                        display_meta=meta,
+                    )
+            return
+
+        # Model-name completion after @
         at_pos = text.rfind("@")
         if at_pos == -1:
             return

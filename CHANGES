@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.18.4 — 2026-05-18
+- Typing `/` in the REPL shows a completion dropdown for all slash commands with descriptions
+
 ## v0.18.3 — 2026-05-18
 - Cleanup dialog skips sessions with no existing local or remote branches
 - Sessions are pruned to the 5 most recent on save; configurable via `max_sessions` in global config
