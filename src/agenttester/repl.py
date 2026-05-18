@@ -485,15 +485,15 @@ async def run_repl(
     _shutting_down = False
 
     def _toolbar() -> HTML:
-        """Dynamic bottom toolbar showing running/waiting status."""
-        active = [t for t in _background_tasks if not t.done()]
+        """Dynamic bottom toolbar showing counts only."""
+        waiting_names = {q.model_name for q in question_registry.pending()}
+        n_running = len(_busy_models - waiting_names)
+        n_waiting = len(waiting_names)
         parts: list[str] = []
-        if active:
-            parts.append(f"<b>{len(active)} running</b>")
-        pending_qs = question_registry.pending()
-        if pending_qs:
-            names = ", ".join(q.model_name for q in pending_qs)
-            parts.append(f"<ansiyellow>{len(pending_qs)} waiting: {names}</ansiyellow>")
+        if n_running:
+            parts.append(f"<ansigreen>{n_running} running</ansigreen>")
+        if n_waiting:
+            parts.append(f"<ansiyellow>{n_waiting} waiting</ansiyellow>")
         if not parts:
             return HTML("<ansigreen>ready</ansigreen>")
         return HTML(" | ".join(parts))
@@ -539,18 +539,15 @@ async def run_repl(
                 continue
             if raw == "/status":
                 _background_tasks -= {t for t in _background_tasks if t.done()}
-                running = len(_background_tasks)
-                pending_qs = question_registry.pending()
-                if not running and not pending_qs:
-                    console.print("[dim]All models idle.[/dim]\n")
-                else:
-                    if running:
-                        console.print(f"[dim]{running} model(s) running[/dim]")
-                    for q in pending_qs:
-                        console.print(
-                            f"  [yellow]⏸ {q.model_name}[/yellow]: {q.question[:80]}"
-                        )
-                    console.print()
+                waiting_names = {q.model_name for q in question_registry.pending()}
+                for name in models:
+                    if name in waiting_names:
+                        console.print(f"  [yellow]⏸ {name}[/yellow]  waiting")
+                    elif name in _busy_models:
+                        console.print(f"  [green]● {name}[/green]  running")
+                    else:
+                        console.print(f"  [dim]○ {name}[/dim]  idle")
+                console.print()
                 continue
 
             if raw.startswith("/reply "):

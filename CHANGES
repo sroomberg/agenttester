@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.18.2 — 2026-05-18
+- Toolbar shows separate running/waiting counts with color; `/status` lists every model as running, waiting, or idle
+
 ## v0.18.1 — 2026-05-18
 - Prevent sending prompts to busy models; REPL now rejects `/send` to a model that is already running
 - `/status` command shows running, waiting, and idle models
