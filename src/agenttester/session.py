@@ -10,20 +10,18 @@ from pathlib import Path
 
 import yaml
 
+from .config import GLOBAL_CONFIG_DIR, _get_global_config_candidates
+
 _DEFAULT_MAX_SESSIONS = 5
 
 
 def _default_sessions_dir() -> Path:
-    return Path.home() / ".config" / "agenttester" / "sessions"
+    return GLOBAL_CONFIG_DIR / "sessions"
 
 
 def _read_max_sessions() -> int:
     """Read max_sessions from global config, falling back to the default."""
-    config_candidates = [
-        Path.home() / ".config" / "agenttester" / "config.yml",
-        Path.home() / ".config" / "agenttester" / "config.yaml",
-    ]
-    for path in config_candidates:
+    for path in _get_global_config_candidates():
         if path.exists():
             with contextlib.suppress(Exception):
                 data = yaml.safe_load(path.read_text()) or {}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from ..agent_runner import AgentResult
@@ -23,7 +23,7 @@ class CostTracker:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record costs for all agents in a run."""
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         for result in results:
             entry = CostEntry(
                 timestamp=timestamp,

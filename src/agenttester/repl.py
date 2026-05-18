@@ -22,7 +22,7 @@ from rich.console import Console
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
 from .events import EventLogger
-from .git_manager import GitManager, _sanitize_ref_component
+from .git_manager import GitManager, _sanitize_ref_component, branch_name
 from .loop import run_agent_loop
 from .providers import (
     AnthropicProvider,
@@ -39,8 +39,10 @@ from .vllm import check_connection
 _COMMAND_PATTERN = re.compile(
     r"agent-?tester\s+query\s+(https?://\S+)\s+(\S+)\s+\{prompt\}"
 )
-_AT_PATTERN = re.compile(r"^@(\S*)$|^@(\S+)\s")
 
+_DEFAULT_MAX_TURNS = 100
+_DEFAULT_MAX_TOKENS = 4096
+_MAX_DIFF_CHARS = 4000
 
 _SLASH_COMMANDS = [
     ("/reset", "clear conversation history"),
@@ -85,14 +87,40 @@ class _ModelCompleter(Completer):
 
 @dataclass
 class Model:
+    # --- static configuration ---
     name: str
     model_id: str
     provider: Provider
-    max_tokens: int = 4096
-    max_turns: int = 100
+    max_tokens: int = _DEFAULT_MAX_TOKENS
+    max_turns: int = _DEFAULT_MAX_TURNS
+    # --- mutable runtime state ---
     messages: list[dict] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
     event_logger: EventLogger | None = None
+
+    def setup_executor(
+        self,
+        workdir: str,
+        pem_path: str | None = None,
+        notify_url: str | None = None,
+        question_registry: QuestionRegistry | None = None,
+    ) -> None:
+        self.tool_executor = ToolExecutor(
+            workdir=workdir,
+            pem_path=pem_path,
+            model_name=self.name,
+            notify_url=notify_url,
+            question_registry=question_registry,
+        )
+
+    def wire_event_logger(self, session_name: str) -> None:
+        """Attach an event logger and connect it to this model's tool executor."""
+        with contextlib.suppress(OSError):
+            self.event_logger = EventLogger(session_name, self.name)
+            if self.tool_executor is not None:
+                self.tool_executor.set_event_handler(
+                    _make_event_handler(self.event_logger)
+                )
 
 
 def _provider_label(m: Model) -> str:
@@ -133,8 +161,8 @@ def _parse_models_from_file(path: Path) -> dict[str, Model]:
             name=name,
             model_id=model_cfg["model"],
             provider=prov,
-            max_tokens=model_cfg.get("max_tokens", 4096),
-            max_turns=model_cfg.get("max_turns", 100),
+            max_tokens=model_cfg.get("max_tokens", _DEFAULT_MAX_TOKENS),
+            max_turns=model_cfg.get("max_turns", _DEFAULT_MAX_TURNS),
         )
 
     # Backward compat: discover OpenAI-compatible models from agent commands
@@ -438,8 +466,8 @@ async def _run_evaluate(
             return
 
         diff_text = report["diff"]
-        if len(diff_text) > 4000:
-            diff_text = diff_text[:4000] + "\n... [truncated]"
+        if len(diff_text) > _MAX_DIFF_CHARS:
+            diff_text = diff_text[:_MAX_DIFF_CHARS] + "\n... [truncated]"
 
         review_prompt = f"Peer-review the work of AI agent '{reviewed_name}'.\n\n"
         if report["commits"]:
@@ -482,16 +510,20 @@ async def _run_evaluate(
             console.print()
 
 
-async def run_repl(
-    config_path: Path | None = None,
-    skip_checks: bool = False,
-    session_name: str | None = None,
-    workdir: Path | None = None,
-    pem_path: str | None = None,
-    notify_url: str | None = None,
-    extra_skills: list[Path] | None = None,
-) -> None:
-    console = Console()
+# ---------------------------------------------------------------------------
+# run_repl setup phases
+# ---------------------------------------------------------------------------
+
+
+async def _load_and_check_models(
+    config_path: Path | None,
+    skip_checks: bool,
+    console: Console,
+) -> dict[str, Model] | None:
+    """Load models from config and (optionally) filter to reachable ones.
+
+    Returns None when no usable models are found.
+    """
     models = load_models(config_path)
     if not models:
         console.print("[red]No models found in config.[/red]")
@@ -499,38 +531,42 @@ async def run_repl(
             "Add a 'models:' section or agents using 'agent-tester query'"
             " commands to your agent-tester.yaml."
         )
-        return
+        return None
 
     if skip_checks:
         model_list = ", ".join(models)
         console.print(
             f"[bold]Models:[/bold] {model_list}  [dim](connection checks skipped)[/dim]"
         )
-    else:
-        with console.status("[dim]Checking connections…[/dim]"):
-            reachable = await _check_connections(models)
+        return models
 
-        for name, ok in reachable.items():
-            icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
-            console.print(
-                f"  {icon} {name}  [dim]{_provider_label(models[name])}[/dim]"
-            )
+    with console.status("[dim]Checking connections…[/dim]"):
+        reachable = await _check_connections(models)
 
-        live_models = {name: m for name, m in models.items() if reachable[name]}
-        if not live_models:
-            console.print("\n[red]No reachable models. Check your endpoints.[/red]")
-            return
+    for name, ok in reachable.items():
+        icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
+        console.print(f"  {icon} {name}  [dim]{_provider_label(models[name])}[/dim]")
 
-        if len(live_models) < len(models):
-            dropped = len(models) - len(live_models)
-            console.print(
-                f"\n[yellow]Continuing with {len(live_models)} reachable model(s) "
-                f"({dropped} unreachable skipped).[/yellow]"
-            )
+    live_models = {name: m for name, m in models.items() if reachable[name]}
+    if not live_models:
+        console.print("\n[red]No reachable models. Check your endpoints.[/red]")
+        return None
 
-        models = live_models
+    if len(live_models) < len(models):
+        dropped = len(models) - len(live_models)
+        console.print(
+            f"\n[yellow]Continuing with {len(live_models)} reachable model(s) "
+            f"({dropped} unreachable skipped).[/yellow]"
+        )
 
-    # Session setup — always create one; auto-generate a name when none given
+    return live_models
+
+
+def _init_session(
+    session_name: str | None,
+    console: Console,
+) -> tuple[ReplSession, str]:
+    """Load or create a session and print a status line. Returns (session, name)."""
     if not session_name:
         session_name = str(uuid.uuid4())
     session, is_new = ReplSession.load_or_create(session_name)
@@ -542,79 +578,166 @@ async def run_repl(
             f"[dim]Session: {session_name}"
             f"  ({n} message(s) across {len(session.histories)} model(s))[/dim]"
         )
+    return session, session_name
 
-    # Shared question registry for ask_user tool
-    question_registry = QuestionRegistry()
 
-    # Worktree + tool use setup — defaults to CWD so branches land in the
-    # repo the REPL is invoked from when --workdir is not explicitly given.
+def _setup_git_and_tools(
+    workdir: Path | None,
+    models: dict[str, Model],
+    session_name: str,
+    pem_path: str | None,
+    notify_url: str | None,
+    question_registry: QuestionRegistry,
+    console: Console,
+) -> GitManager | None:
+    """Clone the repo per-model (when possible) and attach tool executors.
+
+    Returns a GitManager when git is available, or None when it isn't.
+    """
     workdir_path = Path(workdir).resolve() if workdir else Path.cwd()
-    git_mgr: GitManager | None = None
     try:
         git_mgr = GitManager(workdir_path)
         if git_mgr.has_commits():
             console.print(f"\n[dim]Cloning {workdir_path} for each model…[/dim]")
             for model in models.values():
                 clone_path = git_mgr.clone_for_model(model.name, session_name)
-                model.tool_executor = ToolExecutor(
+                model.setup_executor(
                     workdir=str(clone_path),
                     pem_path=pem_path,
-                    model_name=model.name,
                     notify_url=notify_url,
                     question_registry=question_registry,
                 )
             clones_dir = Path(tempfile.gettempdir()) / "agenttester" / session_name
             console.print(f"[dim]Each model working in {clones_dir}[/dim]")
+            return git_mgr
         else:
-            git_mgr = None
             console.print(
                 "[yellow]workdir has no commits; "
                 "tools enabled but no branches.[/yellow]"
             )
-            for model in models.values():
-                model.tool_executor = ToolExecutor(
-                    workdir=str(workdir_path),
-                    pem_path=pem_path,
-                    model_name=model.name,
-                    notify_url=notify_url,
-                    question_registry=question_registry,
-                )
     except Exception:
-        git_mgr = None
         if workdir:
             console.print(
                 f"[yellow]{workdir} is not a git repo; "
                 "tools enabled, no branches.[/yellow]"
             )
-        for model in models.values():
-            model.tool_executor = ToolExecutor(
-                workdir=str(workdir_path),
-                pem_path=pem_path,
-                model_name=model.name,
-                notify_url=notify_url,
-                question_registry=question_registry,
-            )
 
-    # Skill seeding
-    skill_text = load_skills(Path.cwd(), extra_paths=extra_skills)
+    for model in models.values():
+        model.setup_executor(
+            workdir=str(workdir_path),
+            pem_path=pem_path,
+            notify_url=notify_url,
+            question_registry=question_registry,
+        )
+    return None
+
+
+def _seed_histories(
+    models: dict[str, Model],
+    session: ReplSession,
+    skill_text: str,
+) -> list[dict]:
+    """Restore saved histories or seed from skills. Returns the seed messages."""
     seed: list[dict] = [{"role": "system", "content": skill_text}] if skill_text else []
-
-    # Restore histories or seed fresh
     for name, model in models.items():
-        if session and name in session.histories and session.histories[name]:
+        if session.histories.get(name):
             model.messages = list(session.histories[name])
         else:
             model.messages = list(seed)
+    return seed
 
-    if seed:
-        console.print("[dim]Skills loaded into context.[/dim]")
 
-    # Attach an event logger to each model so watchers can follow activity
+def _attach_event_loggers(models: dict[str, Model], session_name: str) -> None:
+    """Wire an event logger to each model and its tool executor."""
     for model in models.values():
-        with contextlib.suppress(OSError):
-            model.event_logger = EventLogger(session_name, model.name)
-            if model.tool_executor is not None:
-                model.tool_executor._on_event = _make_event_handler(model.event_logger)
+        model.wire_event_logger(session_name)
+
+
+# ---------------------------------------------------------------------------
+# REPL loop helpers
+# ---------------------------------------------------------------------------
+
+
+def _handle_reply(
+    raw: str,
+    question_registry: QuestionRegistry,
+    console: Console,
+) -> bool:
+    """Handle /reply commands. Returns True if the input was consumed."""
+    if not raw.startswith("/reply "):
+        return False
+    rest = raw[7:].strip()
+    if not rest.startswith("@"):
+        console.print("[yellow]Usage: /reply @model <response>[/yellow]\n")
+        return True
+    parts = rest[1:].split(None, 1)
+    target = parts[0] if parts else ""
+    response_text = parts[1] if len(parts) > 1 else ""
+    if not response_text:
+        console.print("[yellow]Usage: /reply @model <response>[/yellow]\n")
+        return True
+    if question_registry.respond(target, response_text):
+        console.print(f"[dim]Sent response to {target}.[/dim]\n")
+    else:
+        console.print(f"[yellow]{target} is not waiting for a response.[/yellow]\n")
+    return True
+
+
+def _resolve_targets(
+    raw: str,
+    models: dict[str, Model],
+    console: Console,
+) -> tuple[str, dict[str, Model]] | None:
+    """Parse @model routing or broadcast. Returns (prompt, targets) or None."""
+    if raw.startswith("@"):
+        parts = raw[1:].split(None, 1)
+        target_name = parts[0] if parts else ""
+        if target_name not in models:
+            known = ", ".join(f"@{n}" for n in models)
+            console.print(
+                f"[yellow]Unknown model '{target_name}'. Known: {known}[/yellow]\n"
+            )
+            return None
+        prompt_text = parts[1] if len(parts) > 1 else ""
+        if not prompt_text:
+            console.print("[yellow]No message after @model.[/yellow]\n")
+            return None
+        return prompt_text, {target_name: models[target_name]}
+    return raw, models
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+async def run_repl(
+    config_path: Path | None = None,
+    skip_checks: bool = False,
+    session_name: str | None = None,
+    workdir: Path | None = None,
+    pem_path: str | None = None,
+    notify_url: str | None = None,
+    extra_skills: list[Path] | None = None,
+) -> None:
+    console = Console()
+
+    models = await _load_and_check_models(config_path, skip_checks, console)
+    if not models:
+        return
+
+    session, session_name = _init_session(session_name, console)
+    question_registry = QuestionRegistry()
+    git_mgr = _setup_git_and_tools(
+        workdir, models, session_name, pem_path, notify_url, question_registry, console
+    )
+
+    skill_text = load_skills(Path.cwd(), extra_paths=extra_skills)
+    seed = _seed_histories(models, session, skill_text)
+    _attach_event_loggers(models, session_name)
+
+    if skill_text:
+        console.print("[dim]Skills loaded into context.[/dim]")
 
     console.print(
         "\n[dim]Commands: /reset (clear history), /reply @model <response>,"
@@ -624,20 +747,15 @@ async def run_repl(
     history_file = Path.home() / ".config" / "agenttester" / "repl_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Branch slug negotiated once on the first prompt; reused for the whole session.
     _session_branch_slug: str | None = None
-
-    # Background tasks for model runs — kept alive across prompt iterations
     _background_tasks: set[asyncio.Task] = set()
     _busy_models: set[str] = set()
-    _shutting_down = False
     _ctrl_c_at: float | None = None
     _ctrl_c_clear_task: asyncio.Task | None = None
     _had_user_input = False
     _reports: dict[str, dict[str, str]] = {}
 
     def _toolbar() -> HTML:
-        """Dynamic bottom toolbar showing counts only."""
         if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < 2.0:
             return HTML("<ansired>Press Ctrl-C to exit</ansired>")
         waiting_names = {q.model_name for q in question_registry.pending()}
@@ -670,7 +788,6 @@ async def run_repl(
     _stdout_ctx.__enter__()
     try:
         while True:
-            # Clean up finished background tasks
             _background_tasks -= {t for t in _background_tasks if t.done()}
 
             try:
@@ -689,15 +806,17 @@ async def run_repl(
                 break
 
             raw = raw.strip()
-            if not raw:
+            if not raw or raw == "exit":
+                if raw == "exit":
+                    break
                 continue
-            if raw == "exit":
-                break
+
             if raw == "/reset":
                 for model in models.values():
                     model.messages = list(seed)
                 console.print("[dim]Context cleared.[/dim]\n")
                 continue
+
             if raw == "/status":
                 _background_tasks -= {t for t in _background_tasks if t.done()}
                 waiting_names = {q.model_name for q in question_registry.pending()}
@@ -725,47 +844,13 @@ async def run_repl(
                 )
                 continue
 
-            if raw.startswith("/reply "):
-                reply_rest = raw[7:].strip()
-                if reply_rest.startswith("@"):
-                    parts = reply_rest[1:].split(None, 1)
-                    target = parts[0] if parts else ""
-                    response_text = parts[1] if len(parts) > 1 else ""
-                    if not response_text:
-                        console.print(
-                            "[yellow]Usage: /reply @model <response>[/yellow]\n"
-                        )
-                        continue
-                    if question_registry.respond(target, response_text):
-                        console.print(f"[dim]Sent response to {target}.[/dim]\n")
-                    else:
-                        console.print(
-                            f"[yellow]{target} is not waiting for a"
-                            " response.[/yellow]\n"
-                        )
-                else:
-                    console.print("[yellow]Usage: /reply @model <response>[/yellow]\n")
+            if _handle_reply(raw, question_registry, console):
                 continue
 
-            # @model routing: "@name rest of message" targets a single model
-            if raw.startswith("@"):
-                parts = raw[1:].split(None, 1)
-                target_name = parts[0] if parts else ""
-                if target_name not in models:
-                    known = ", ".join(f"@{n}" for n in models)
-                    console.print(
-                        f"[yellow]Unknown model '{target_name}'. "
-                        f"Known: {known}[/yellow]\n"
-                    )
-                    continue
-                prompt_text = parts[1] if len(parts) > 1 else ""
-                if not prompt_text:
-                    console.print("[yellow]No message after @model.[/yellow]\n")
-                    continue
-                target_models = {target_name: models[target_name]}
-            else:
-                prompt_text = raw
-                target_models = models
+            resolved = _resolve_targets(raw, models, console)
+            if resolved is None:
+                continue
+            prompt_text, target_models = resolved
 
             # Negotiate branch name once per session on the first prompt
             if _session_branch_slug is None:
@@ -777,20 +862,15 @@ async def run_repl(
                 else:
                     feature_slug = _sanitize_ref_component(prompt_text[:60])
                 _session_branch_slug = f"{short_session}-{feature_slug}"
-                # Record potential branch names for all models once
                 for m in models.values():
-                    branch_name = (
-                        f"agenttester/{_sanitize_ref_component(m.name)}"
-                        f"/{_session_branch_slug}"
-                    )
-                    if branch_name not in session.branches:
-                        session.branches.append(branch_name)
+                    b = branch_name(m.name, _session_branch_slug)
+                    if b not in session.branches:
+                        session.branches.append(b)
 
             for m in target_models.values():
                 if m.tool_executor is not None:
                     m.tool_executor.set_branch_slug(_session_branch_slug)
 
-            # Filter out busy models
             busy_in_target = {nm for nm in target_models if nm in _busy_models}
             if busy_in_target:
                 console.print(
@@ -807,7 +887,6 @@ async def run_repl(
                 )
                 continue
 
-            # Log prompt event to each model's event log
             for _nm, m in target_models.items():
                 if m.event_logger is not None:
                     m.event_logger.log("prompt", prompt_text)
@@ -815,8 +894,9 @@ async def run_repl(
 
             n = len(target_models)
             label = "model" if n == 1 else "models"
-            model_list = ", ".join(target_models)
-            console.print(f"[dim]Querying {n} {label}: {model_list}…[/dim]\n")
+            console.print(
+                f"[dim]Querying {n} {label}: {', '.join(target_models)}…[/dim]\n"
+            )
 
             for nm, m in target_models.items():
 
@@ -852,10 +932,8 @@ async def run_repl(
                 _background_tasks.add(asyncio.create_task(_background_run()))
     finally:
         _stdout_ctx.__exit__(None, None, None)
-        _shutting_down = True
         question_registry.cancel_all()
 
-        # Give background tasks a moment to finish current tool execution
         if _background_tasks:
             console.print(
                 f"[dim]Waiting for {len(_background_tasks)} task(s) to stop…[/dim]"
@@ -863,7 +941,6 @@ async def run_repl(
             _, still_running = await asyncio.wait(_background_tasks, timeout=5.0)
             for task in still_running:
                 task.cancel()
-            # Suppress CancelledError from cancelled tasks
             for task in _background_tasks:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await asyncio.shield(task)
@@ -875,16 +952,14 @@ async def run_repl(
                 session.histories[name] = list(model.messages)
             session.save()
 
-            # Clean up stray local branches not in the session's expected set
             if git_mgr is not None and session.branches and _session_branch_slug:
                 allowed = set(session.branches)
-                for branch in git_mgr.list_agenttester_branches():
-                    if branch not in allowed and _session_branch_slug in branch:
+                for b in git_mgr.list_agenttester_branches():
+                    if b not in allowed and _session_branch_slug in b:
                         with contextlib.suppress(Exception):
-                            git_mgr.delete_local_branch(branch)
+                            git_mgr.delete_local_branch(b)
 
             console.print(f"\n[dim]bye  —  agent-tester --resume {session_name}[/dim]")
 
-        # Remove per-model clone directories regardless of whether we saved
         if git_mgr is not None:
             GitManager.cleanup_model_clones(session_name)

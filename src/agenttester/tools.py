@@ -10,7 +10,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from .git_manager import _sanitize_ref_component
+from .git_manager import _pem_ssh_command, branch_name
 from .questions import QuestionRegistry
 
 _MAX_OUTPUT_BYTES = 8192
@@ -245,6 +245,10 @@ class ToolExecutor:
         if not self._branch_created:
             self._branch_slug = slug
 
+    def set_event_handler(self, handler: Callable[[str, str], None] | None) -> None:
+        """Replace the event handler used for observability callbacks."""
+        self._on_event = handler
+
     def _ensure_branch(self) -> None:
         """Create and checkout the model's branch on first commit."""
         if self._branch_created or not self._branch_slug:
@@ -283,8 +287,7 @@ class ToolExecutor:
     def _git_env(self) -> dict[str, str]:
         if not self.pem_path:
             return {}
-        ssh_cmd = f"ssh -i {self.pem_path} -o StrictHostKeyChecking=no"
-        return {"GIT_SSH_COMMAND": ssh_cmd}
+        return {"GIT_SSH_COMMAND": _pem_ssh_command(self.pem_path)}
 
     def _run(
         self,
@@ -345,8 +348,7 @@ class ToolExecutor:
     def _allowed_branch(self) -> str | None:
         """The only branch name this executor is allowed to push."""
         if self._model_name and self._branch_slug:
-            safe_model = _sanitize_ref_component(self._model_name)
-            return f"agenttester/{safe_model}/{self._branch_slug}"
+            return branch_name(self._model_name, self._branch_slug)
         return None
 
     def _tool_git_push(self, branch: str, remote: str = "origin") -> str:

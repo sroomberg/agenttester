@@ -12,6 +12,8 @@ from typing import Any
 from .questions import QuestionRegistry
 from .tools import ToolExecutor
 
+_DEFAULT_MAX_TURNS = 20
+
 # Patterns for XML-style tool calls models emit in text
 # Format 1: <function=name>\n<parameter=key>value</parameter>\n</function>
 _FUNC_EQ_RE = re.compile(
@@ -95,7 +97,7 @@ async def run_agent_loop(
     messages: list[dict],
     prompt: str,
     executor: ToolExecutor,
-    max_turns: int = 20,
+    max_turns: int = _DEFAULT_MAX_TURNS,
     max_tokens: int = 4096,
     on_event: Callable[[str, str], None] | None = None,
     question_registry: QuestionRegistry | None = None,

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.20.5 — 2026-05-18
+- Fix `datetime.utcnow()` (naive UTC) → `datetime.now(timezone.utc)` in `cost/tracker.py`
+- Remove unused `_AT_PATTERN` regex from `repl.py`
+- `session.py` and `events.py` now use `GLOBAL_CONFIG_DIR` from `config.py` instead of hardcoding the path; `session.py` reuses `_get_global_config_candidates()` for max-session lookup
+- Extract `_split_system()` in `providers/anthropic.py` — eliminates duplicated system-message extraction in `async_call` and `async_stream_raw`
+- Add `branch_name(agent, run)` and `_pem_ssh_command(pem)` to `git_manager.py`; all branch-name constructions across `git_manager`, `tools`, `orchestrator`, and `repl` now use the single function. Fixes unsanitized agent name in `orchestrator._build_prompt`
+- Add `_DEFAULT_MAX_TURNS` / `_DEFAULT_MAX_TOKENS` / `_MAX_DIFF_CHARS` / `_DEFAULT_LOOP_TURNS` named constants to replace magic literals
+- Add `set_event_handler()` to `ToolExecutor`; add `setup_executor()` and `wire_event_logger()` to `Model` so callers no longer reach into model internals
+- Decompose `run_repl()` into `_load_and_check_models`, `_init_session`, `_setup_git_and_tools`, `_seed_histories`, `_attach_event_loggers`; extract `_handle_reply` and `_resolve_targets` from the loop; drop dead `_shutting_down` state
+
 ## v0.20.4 — 2026-05-18
 - Split `/evaluate` into two commands: `/report` collects and displays each model's commit summary and diff stats; `/evaluate` runs peer reviews using the stored reports, auto-generating them first if not already done
 

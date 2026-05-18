@@ -15,6 +15,19 @@ import git
 from git.exc import GitCommandError
 
 
+def _pem_ssh_command(pem_path: str) -> str:
+    """Return a GIT_SSH_COMMAND value that authenticates with *pem_path*."""
+    return f"ssh -i {pem_path} -o StrictHostKeyChecking=no"
+
+
+def branch_name(agent_name: str, run_name: str) -> str:
+    """Return the canonical agenttester branch name for an agent + run pair."""
+    return (
+        f"agenttester/{_sanitize_ref_component(agent_name)}"
+        f"/{_sanitize_ref_component(run_name)}"
+    )
+
+
 def _sanitize_ref_component(name: str) -> str:
     """Sanitize an arbitrary string to be a safe git ref name component.
 
@@ -179,7 +192,7 @@ class GitManager:
         """
         safe_agent = _sanitize_ref_component(agent_name)
         safe_run = _sanitize_ref_component(run_name)
-        branch = f"agenttester/{safe_agent}/{safe_run}"
+        branch = branch_name(agent_name, run_name)
         worktree_path = self.worktree_base / safe_run / safe_agent
 
         if worktree_path.exists():
@@ -207,24 +220,19 @@ class GitManager:
         When *pem_path* is provided it is used as the SSH identity file,
         overriding any ``GIT_SSH_COMMAND`` already in the environment.
         """
-        branch = (
-            f"agenttester/{_sanitize_ref_component(agent_name)}"
-            f"/{_sanitize_ref_component(run_name)}"
-        )
         if pem_path:
-            self.repo.git.update_environment(
-                GIT_SSH_COMMAND=f"ssh -i {pem_path} -o StrictHostKeyChecking=no"
-            )
-        self.repo.git.push(remote, branch)
+            self.repo.git.update_environment(GIT_SSH_COMMAND=_pem_ssh_command(pem_path))
+        self.repo.git.push(remote, branch_name(agent_name, run_name))
 
     def create_worktree(self, agent_name: str, run_name: str) -> Path:
         """Create a worktree with a new branch for an agent run."""
         safe_agent = _sanitize_ref_component(agent_name)
         safe_run = _sanitize_ref_component(run_name)
-        branch = f"agenttester/{safe_agent}/{safe_run}"
         worktree_path = self.worktree_base / safe_run / safe_agent
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
-        self.repo.git.worktree("add", "-b", branch, str(worktree_path))
+        self.repo.git.worktree(
+            "add", "-b", branch_name(agent_name, run_name), str(worktree_path)
+        )
         return worktree_path
 
     def commit_all(
@@ -246,10 +254,7 @@ class GitManager:
         self, agent_name: str, run_name: str, base_ref: str
     ) -> DiffStats:
         """Get diff statistics between the base ref and an agent's branch."""
-        branch = (
-            f"agenttester/{_sanitize_ref_component(agent_name)}"
-            f"/{_sanitize_ref_component(run_name)}"
-        )
+        branch = branch_name(agent_name, run_name)
         try:
             stat_line = self.repo.git.diff("--shortstat", base_ref, branch)
 
@@ -276,10 +281,7 @@ class GitManager:
 
     def get_diff_text(self, agent_name: str, run_name: str, base_ref: str) -> str:
         """Return the full unified diff between base_ref and an agent's branch."""
-        branch = (
-            f"agenttester/{_sanitize_ref_component(agent_name)}"
-            f"/{_sanitize_ref_component(run_name)}"
-        )
+        branch = branch_name(agent_name, run_name)
         try:
             return self.repo.git.diff(base_ref, branch)
         except GitCommandError:
@@ -295,11 +297,11 @@ class GitManager:
         """
         safe_agent = _sanitize_ref_component(agent_name)
         safe_run = _sanitize_ref_component(run_name)
-        branch = f"agenttester/{safe_agent}/{safe_run}"
         worktree_path = self.worktree_base / safe_run / safe_agent
 
+        b = branch_name(agent_name, run_name)
         try:
-            count = int(self.repo.git.rev_list(f"HEAD..{branch}", "--count"))
+            count = int(self.repo.git.rev_list(f"HEAD..{b}", "--count"))
         except GitCommandError:
             return False  # branch doesn't exist or git error — leave as-is
 
@@ -311,7 +313,7 @@ class GitManager:
         with contextlib.suppress(OSError):
             worktree_path.parent.rmdir()
         with contextlib.suppress(GitCommandError):
-            self.repo.git.branch("-d", branch)
+            self.repo.git.branch("-d", b)
         return True
 
     def cleanup_worktree(self, run_name: str, agent_name: str) -> None:

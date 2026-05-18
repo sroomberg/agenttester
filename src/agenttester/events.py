@@ -7,9 +7,11 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .config import GLOBAL_CONFIG_DIR
+
 
 def _sessions_dir() -> Path:
-    return Path.home() / ".config" / "agenttester" / "sessions"
+    return GLOBAL_CONFIG_DIR / "sessions"
 
 
 class EventLogger:

@@ -19,7 +19,7 @@ from .evaluator import (
     evaluate_diff,
     summarize_if_needed,
 )
-from .git_manager import GitManager
+from .git_manager import GitManager, branch_name
 from .report import generate_report
 from .skills import load_skills
 
@@ -73,11 +73,10 @@ async def _user_input_router(
 
 def _build_prompt(prompt: str, run_name: str, agent_name: str, skills: str) -> str:
     """Prepend skills and branch name to the user's prompt."""
-    branch = f"agenttester/{agent_name}/{run_name}"
     parts = []
     if skills:
         parts.append(skills)
-    parts.append(f"You are working on branch `{branch}`.")
+    parts.append(f"You are working on branch `{branch_name(agent_name, run_name)}`.")
     parts.append(prompt)
     return "\n\n".join(parts)
 

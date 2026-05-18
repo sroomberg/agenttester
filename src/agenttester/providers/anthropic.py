@@ -28,6 +28,13 @@ def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
     return result
 
 
+def _split_system(messages: list[dict]) -> tuple[str | None, list[dict]]:
+    """Return (system_text, non_system_messages) for Anthropic's API format."""
+    parts = [m["content"] for m in messages if m["role"] == "system"]
+    rest = [m for m in messages if m["role"] != "system"]
+    return ("\n\n".join(parts) if parts else None), rest
+
+
 def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
     """Convert OpenAI-format messages to Anthropic format.
 
@@ -87,16 +94,14 @@ class AnthropicProvider(Provider):
         self, model: str, messages: list[dict], max_tokens: int
     ) -> str:
         api_key = os.environ.get(self.api_key_env, "")
-        system_parts = [m["content"] for m in messages if m["role"] == "system"]
+        system, non_system = _split_system(messages)
         body: dict = {
             "model": model,
             "max_tokens": max_tokens,
-            "messages": _to_anthropic_messages(
-                [m for m in messages if m["role"] != "system"]
-            ),
+            "messages": _to_anthropic_messages(non_system),
         }
-        if system_parts:
-            body["system"] = "\n\n".join(system_parts)
+        if system:
+            body["system"] = system
         _timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=300)
         async with (
             aiohttp.ClientSession(timeout=_timeout) as session,
@@ -127,17 +132,15 @@ class AnthropicProvider(Provider):
         Returns the same normalized dict as ``call_raw`` once the stream ends.
         """
         api_key = os.environ.get(self.api_key_env, "")
-        system_parts = [m["content"] for m in messages if m["role"] == "system"]
+        system, non_system = _split_system(messages)
         body: dict = {
             "model": model,
             "max_tokens": max_tokens,
-            "messages": _to_anthropic_messages(
-                [m for m in messages if m["role"] != "system"]
-            ),
+            "messages": _to_anthropic_messages(non_system),
             "stream": True,
         }
-        if system_parts:
-            body["system"] = "\n\n".join(system_parts)
+        if system:
+            body["system"] = system
         if tools:
             body["tools"] = _to_anthropic_tools(tools)
 
