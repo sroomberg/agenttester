@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.20.1 — 2026-05-18
+- Fix `agent-tester cleanup` showing no sessions: remote branch listing now queries the remote live via `git ls-remote` instead of relying on cached tracking refs that were never populated by the clone-based workflow
+
 ## v0.20.0 — 2026-05-18
 - `/evaluate` command: each model reviews every other model's work; collects git commits and diffs from each model's clone, sends a structured peer-review prompt to all other models in parallel, and displays results as they arrive
 

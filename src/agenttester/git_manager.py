@@ -112,15 +112,16 @@ class GitManager:
             shutil.rmtree(session_dir, ignore_errors=True)
 
     def list_remote_agenttester_branches(self, remote: str = "origin") -> list[str]:
-        """Return remote branch names under agenttester/ using cached tracking refs."""
+        """Return remote branch names under agenttester/ by querying the remote live."""
         try:
-            remote_obj = self.repo.remote(remote)
-            prefix = f"{remote}/agenttester/"
-            return [
-                ref.name[len(f"{remote}/") :]
-                for ref in remote_obj.refs
-                if ref.name.startswith(prefix)
-            ]
+            output = self.repo.git.ls_remote("--heads", remote, "agenttester/*")
+            branches = []
+            for line in output.splitlines():
+                if "\t" in line:
+                    ref = line.split("\t", 1)[1].strip()
+                    if ref.startswith("refs/heads/"):
+                        branches.append(ref[len("refs/heads/") :])
+            return branches
         except Exception:
             return []
 
