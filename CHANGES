@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.20.4 — 2026-05-18
+- Split `/evaluate` into two commands: `/report` collects and displays each model's commit summary and diff stats; `/evaluate` runs peer reviews using the stored reports, auto-generating them first if not already done
+
 ## v0.20.3 — 2026-05-18
 - Add `--skills` CLI option to `repl` command: accepts file or directory paths (repeatable); loaded after config-declared skills at highest priority
 - Add `skills:` key support in config files: paths resolved relative to the config file

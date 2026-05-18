@@ -46,6 +46,7 @@ _SLASH_COMMANDS = [
     ("/reset", "clear conversation history"),
     ("/status", "show running/waiting/idle models"),
     ("/reply", "send a response to a waiting model"),
+    ("/report", "show each model's work summary (commits + diff stats)"),
     ("/evaluate", "cross-evaluate: each model reviews the others' work"),
 ]
 
@@ -366,28 +367,65 @@ def _collect_work_report(workdir: str) -> dict[str, str]:
     diff = _run(["git", "diff", "FETCH_HEAD...HEAD"])
     if not diff:
         diff = _run(["git", "diff", "HEAD"])
-    return {"commits": commits, "diff": diff}
+    stat = _run(["git", "diff", "--shortstat", "FETCH_HEAD...HEAD"])
+    if not stat:
+        stat = _run(["git", "diff", "--shortstat", "HEAD"])
+    return {"commits": commits, "diff": diff, "stat": stat}
 
 
-async def _run_evaluate(models: dict[str, Model], console: Console) -> None:
-    """Cross-evaluation: each model reviews every other model's work."""
+async def _run_report(
+    models: dict[str, Model],
+    console: Console,
+    reports_store: dict[str, dict[str, str]],
+) -> None:
+    """Collect each model's work and display a summary. Populates *reports_store*."""
 
-    # Collect work reports in parallel
-    async def _report(name: str, model: Model) -> tuple[str, dict[str, str]]:
+    async def _fetch(name: str, model: Model) -> tuple[str, dict[str, str]]:
         if not model.tool_executor:
-            return name, {"commits": "", "diff": ""}
+            return name, {"commits": "", "diff": "", "stat": ""}
         return name, await asyncio.to_thread(
             _collect_work_report, model.tool_executor.workdir
         )
 
-    reports = dict(await asyncio.gather(*[_report(n, m) for n, m in models.items()]))
-    models_with_work = {k: v for k, v in reports.items() if v["commits"] or v["diff"]}
+    fetched = dict(await asyncio.gather(*[_fetch(n, m) for n, m in models.items()]))
+    reports_store.clear()
+    reports_store.update(fetched)
 
+    models_with_work = {k: v for k, v in fetched.items() if v["commits"] or v["diff"]}
     if not models_with_work:
         console.print(
-            "[yellow]No models have committed or uncommitted"
-            " work to evaluate yet.[/yellow]\n"
+            "[yellow]No models have committed or uncommitted work yet.[/yellow]\n"
         )
+        return
+
+    console.print(f"\n[bold]Work report — {len(models_with_work)} model(s)[/bold]\n")
+    for name, report in models_with_work.items():
+        console.print(f"[bold cyan]── {name} ──[/bold cyan]")
+        if report["commits"]:
+            for line in report["commits"].splitlines():
+                console.print(f"  [dim]{line}[/dim]")
+        if report["stat"]:
+            console.print(f"  {report['stat']}")
+        console.print()
+
+
+async def _run_evaluate(
+    models: dict[str, Model],
+    console: Console,
+    reports_store: dict[str, dict[str, str]],
+) -> None:
+    """Cross-evaluation: each model reviews every other model's work.
+
+    If *reports_store* is empty, report collection runs first.
+    """
+    if not reports_store:
+        console.print("[dim]No reports yet — generating reports first…[/dim]\n")
+        await _run_report(models, console, reports_store)
+
+    models_with_work = {
+        k: v for k, v in reports_store.items() if v["commits"] or v["diff"]
+    }
+    if not models_with_work:
         return
 
     n_work = len(models_with_work)
@@ -596,6 +634,7 @@ async def run_repl(
     _ctrl_c_at: float | None = None
     _ctrl_c_clear_task: asyncio.Task | None = None
     _had_user_input = False
+    _reports: dict[str, dict[str, str]] = {}
 
     def _toolbar() -> HTML:
         """Dynamic bottom toolbar showing counts only."""
@@ -672,10 +711,17 @@ async def run_repl(
                 console.print()
                 continue
 
+            if raw == "/report":
+                console.print("[dim]Collecting work reports…[/dim]\n")
+                _background_tasks.add(
+                    asyncio.create_task(_run_report(models, console, _reports))
+                )
+                continue
+
             if raw == "/evaluate":
                 console.print("[dim]Starting cross-evaluation…[/dim]\n")
                 _background_tasks.add(
-                    asyncio.create_task(_run_evaluate(models, console))
+                    asyncio.create_task(_run_evaluate(models, console, _reports))
                 )
                 continue
 
