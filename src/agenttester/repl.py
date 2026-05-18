@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import subprocess
 import tempfile
 import uuid
 from collections.abc import Callable
@@ -43,6 +44,7 @@ _SLASH_COMMANDS = [
     ("/reset", "clear conversation history"),
     ("/status", "show running/waiting/idle models"),
     ("/reply", "send a response to a waiting model"),
+    ("/evaluate", "cross-evaluate: each model reviews the others' work"),
 ]
 
 
@@ -350,6 +352,96 @@ def _make_event_handler(
     return on_event
 
 
+def _collect_work_report(workdir: str) -> dict[str, str]:
+    """Return commits and diff for a model's clone vs the clone point."""
+
+    def _run(cmd: list[str]) -> str:
+        return subprocess.run(
+            cmd, cwd=workdir, capture_output=True, text=True
+        ).stdout.strip()
+
+    commits = _run(["git", "log", "--oneline", "FETCH_HEAD..HEAD"])
+    diff = _run(["git", "diff", "FETCH_HEAD...HEAD"])
+    if not diff:
+        diff = _run(["git", "diff", "HEAD"])
+    return {"commits": commits, "diff": diff}
+
+
+async def _run_evaluate(models: dict[str, Model], console: Console) -> None:
+    """Cross-evaluation: each model reviews every other model's work."""
+
+    # Collect work reports in parallel
+    async def _report(name: str, model: Model) -> tuple[str, dict[str, str]]:
+        if not model.tool_executor:
+            return name, {"commits": "", "diff": ""}
+        return name, await asyncio.to_thread(
+            _collect_work_report, model.tool_executor.workdir
+        )
+
+    reports = dict(await asyncio.gather(*[_report(n, m) for n, m in models.items()]))
+    models_with_work = {k: v for k, v in reports.items() if v["commits"] or v["diff"]}
+
+    if not models_with_work:
+        console.print(
+            "[yellow]No models have committed or uncommitted"
+            " work to evaluate yet.[/yellow]\n"
+        )
+        return
+
+    n_work = len(models_with_work)
+    console.print(f"\n[bold]Cross-evaluation — {n_work} model(s) with work[/bold]\n")
+
+    for reviewed_name, report in models_with_work.items():
+        reviewers = [(n, m) for n, m in models.items() if n != reviewed_name]
+        if not reviewers:
+            console.print("[yellow]Need at least 2 models for peer review.[/yellow]\n")
+            return
+
+        diff_text = report["diff"]
+        if len(diff_text) > 4000:
+            diff_text = diff_text[:4000] + "\n... [truncated]"
+
+        review_prompt = f"Peer-review the work of AI agent '{reviewed_name}'.\n\n"
+        if report["commits"]:
+            review_prompt += f"Commits:\n```\n{report['commits']}\n```\n\n"
+        if diff_text:
+            review_prompt += f"Diff:\n```diff\n{diff_text}\n```\n\n"
+        review_prompt += (
+            "Evaluate concisely (under 300 words):\n"
+            "1. **Correctness** — does the implementation look correct?\n"
+            "2. **Code quality** — clean, idiomatic, well-structured?\n"
+            "3. **Completeness** — does it fully address the task?\n"
+            "4. **Issues** — any bugs, edge cases, or concerns?"
+        )
+
+        console.print(f"[bold cyan]── {reviewed_name}'s work ──[/bold cyan]")
+        if report["commits"]:
+            first_line = report["commits"].splitlines()[0]
+            console.print(f"[dim]{first_line}[/dim]")
+        console.print()
+
+        async def _review(
+            reviewer_name: str, reviewer: Model, prompt: str = review_prompt
+        ) -> tuple[str, str]:
+            try:
+                result = await reviewer.provider.async_stream_raw(
+                    reviewer.model_id,
+                    [{"role": "user", "content": prompt}],
+                    reviewer.max_tokens,
+                )
+                return reviewer_name, result.get("content") or "[no response]"
+            except Exception as exc:
+                return reviewer_name, f"[error: {exc}]"
+
+        results = await asyncio.gather(*[_review(n, m) for n, m in reviewers])
+        for reviewer_name, text in results:
+            console.print(
+                f"[bold]{reviewer_name}[/bold] reviews [bold]{reviewed_name}[/bold]:"
+            )
+            console.print(text)
+            console.print()
+
+
 async def run_repl(
     config_path: Path | None = None,
     skip_checks: bool = False,
@@ -581,6 +673,13 @@ async def run_repl(
                     else:
                         console.print(f"  [dim]○ {name}[/dim]  idle")
                 console.print()
+                continue
+
+            if raw == "/evaluate":
+                console.print("[dim]Starting cross-evaluation…[/dim]\n")
+                _background_tasks.add(
+                    asyncio.create_task(_run_evaluate(models, console))
+                )
                 continue
 
             if raw.startswith("/reply "):

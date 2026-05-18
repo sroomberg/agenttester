@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.20.0 — 2026-05-18
+- `/evaluate` command: each model reviews every other model's work; collects git commits and diffs from each model's clone, sends a structured peer-review prompt to all other models in parallel, and displays results as they arrive
+
 ## v0.19.2 — 2026-05-18
 - Do not use bash for git branch or push operations. Use the `git_commit` and `git_push` tools instead.
 
