@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import GLOBAL_CONFIG_DIR
+import yaml
+
+from .config import GLOBAL_CONFIG_DIR, get_config_paths
 
 _BUILTIN_SKILLS_DIR = Path(__file__).parent / "skills"
 
@@ -23,12 +25,49 @@ def _load_dir(directory: Path) -> dict[str, str]:
     return {p.name: p.read_text() for p in sorted(directory.glob("*.md"))}
 
 
-def load_skills(repo_path: Path | None = None) -> str:
+def _load_extra(paths: list[Path]) -> list[str]:
+    """Load skills from a list of file or directory paths, in order."""
+    sections: list[str] = []
+    for p in paths:
+        if p.is_dir():
+            for f in sorted(p.glob("*.md")):
+                text = f.read_text().strip()
+                if text:
+                    sections.append(text)
+        elif p.is_file() and p.suffix == ".md":
+            text = p.read_text().strip()
+            if text:
+                sections.append(text)
+    return sections
+
+
+def _skills_from_configs(repo_path: Path | None) -> list[Path]:
+    """Read the ``skills:`` key from all config files and return resolved paths."""
+    try:
+        result: list[Path] = []
+        for cfg_path in get_config_paths(repo_path):
+            with open(cfg_path) as f:
+                data = yaml.safe_load(f) or {}
+            for entry in data.get("skills") or []:
+                p = Path(entry).expanduser()
+                if not p.is_absolute():
+                    p = cfg_path.parent / p
+                result.append(p)
+        return result
+    except Exception:
+        return []
+
+
+def load_skills(
+    repo_path: Path | None = None,
+    extra_paths: list[Path] | None = None,
+) -> str:
     """Return combined skill instructions to prepend to every agent prompt.
 
     Skills are output in priority order so that higher-priority instructions
     appear later in the prompt (recency bias):
       built-ins → global user skills → local project skills
+      → config skills → extra_paths
 
     A user skill with the same filename as a built-in replaces it entirely and
     still appears at the end, ensuring user intent always takes precedence.
@@ -57,5 +96,12 @@ def load_skills(repo_path: Path | None = None) -> str:
     for content in local_skills.values():
         if content.strip():
             sections.append(content.strip())
+
+    # Skills declared in config files (global then local)
+    sections.extend(_load_extra(_skills_from_configs(repo_path)))
+
+    # Skills passed explicitly at runtime (highest priority)
+    if extra_paths:
+        sections.extend(_load_extra(extra_paths))
 
     return "\n\n".join(sections)

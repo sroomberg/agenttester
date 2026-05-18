@@ -10,6 +10,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from .git_manager import _sanitize_ref_component
 from .questions import QuestionRegistry
 
 _MAX_OUTPUT_BYTES = 8192
@@ -344,8 +345,6 @@ class ToolExecutor:
     def _allowed_branch(self) -> str | None:
         """The only branch name this executor is allowed to push."""
         if self._model_name and self._branch_slug:
-            from .git_manager import _sanitize_ref_component
-
             safe_model = _sanitize_ref_component(self._model_name)
             return f"agenttester/{safe_model}/{self._branch_slug}"
         return None

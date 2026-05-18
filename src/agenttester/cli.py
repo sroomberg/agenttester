@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Annotated
 
+import aiohttp
 import typer
 from rich.console import Console
+from rich.table import Table
 
+from .cleanup import run_cleanup
 from .config import get_reports_dir, load_config, load_evaluators_and_eval_config
 from .cost import CostTracker
 from .orchestrator import Orchestrator
 from .repl import run_repl
+from .server import run_server
 from .vllm import query as _vllm_query
+from .watcher import run_watcher
 
 app = typer.Typer(
     name="agent-tester",
@@ -26,9 +33,7 @@ console = Console()
 
 def _version_callback(value: bool) -> None:
     if value:
-        from importlib.metadata import version
-
-        print(f"agent-tester {version('agenttester')}")
+        print(f"agent-tester {_pkg_version('agenttester')}")
         raise typer.Exit()
 
 
@@ -210,8 +215,6 @@ def query(
 ) -> None:
     """Query a vLLM model server and print the response."""
     try:
-        import aiohttp
-
         result = asyncio.run(
             _vllm_query(
                 endpoint, model_id, [{"role": "user", "content": prompt}], max_tokens
@@ -271,6 +274,13 @@ def repl(
             ),
         ),
     ] = None,
+    skills: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--skills",
+            help=("Extra skill file or directory to load; may be repeated"),
+        ),
+    ] = None,
 ) -> None:
     """Start an interactive multi-model REPL."""
     asyncio.run(
@@ -281,6 +291,7 @@ def repl(
             workdir=workdir,
             pem_path=pem,
             notify_url=notify_url,
+            extra_skills=skills,
         )
     )
 
@@ -297,8 +308,6 @@ def watch(
     ] = None,
 ) -> None:
     """Follow a model's live activity from a separate terminal window."""
-    from .watcher import run_watcher
-
     sessions_dir = Path.home() / ".config" / "agenttester" / "sessions"
 
     if not session:
@@ -349,10 +358,6 @@ def serve(
     ] = "127.0.0.1",
 ) -> None:
     """Start an HTTP receiver for agent completion callbacks."""
-    import contextlib
-
-    from .server import run_server
-
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(run_server(host=host, port=port))
 
@@ -373,8 +378,6 @@ def cleanup(
     ] = "origin",
 ) -> None:
     """Interactively clean up branches from old REPL sessions."""
-    from .cleanup import run_cleanup
-
     run_cleanup(workdir or Path.cwd(), remote=remote)
 
 
@@ -433,8 +436,6 @@ def costs(
             return
 
         console.print("[bold]Cost entries:[/bold]\n")
-        from rich.table import Table
-
         table = Table(show_header=True, header_style="bold")
         table.add_column("Run ID")
         table.add_column("Agent")

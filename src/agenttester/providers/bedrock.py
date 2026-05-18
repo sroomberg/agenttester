@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Callable
@@ -174,8 +175,6 @@ class BedrockProvider(Provider):
     async def async_call(
         self, model: str, messages: list[dict], max_tokens: int
     ) -> str:
-        import asyncio
-
         return await asyncio.to_thread(self.call, model, messages, max_tokens)
 
     def _stream_raw_sync(
@@ -250,8 +249,6 @@ class BedrockProvider(Provider):
         on_chunk: Callable[[str], None] | None = None,
     ) -> dict:
         """Async streaming via Bedrock ConverseStream (runs sync in thread)."""
-        import asyncio
-
         return await asyncio.to_thread(
             self._stream_raw_sync, model, messages, max_tokens, tools, on_chunk
         )

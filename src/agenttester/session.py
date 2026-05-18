@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 _DEFAULT_MAX_SESSIONS = 5
 
 
@@ -24,8 +26,6 @@ def _read_max_sessions() -> int:
     for path in config_candidates:
         if path.exists():
             with contextlib.suppress(Exception):
-                import yaml
-
                 data = yaml.safe_load(path.read_text()) or {}
                 val = data.get("max_sessions")
                 if isinstance(val, int) and val > 0:

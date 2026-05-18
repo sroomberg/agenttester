@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import subprocess
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -449,6 +451,7 @@ async def run_repl(
     workdir: Path | None = None,
     pem_path: str | None = None,
     notify_url: str | None = None,
+    extra_skills: list[Path] | None = None,
 ) -> None:
     console = Console()
     models = load_models(config_path)
@@ -555,7 +558,7 @@ async def run_repl(
             )
 
     # Skill seeding
-    skill_text = load_skills(Path.cwd())
+    skill_text = load_skills(Path.cwd(), extra_paths=extra_skills)
     seed: list[dict] = [{"role": "system", "content": skill_text}] if skill_text else []
 
     # Restore histories or seed fresh
@@ -569,8 +572,6 @@ async def run_repl(
         console.print("[dim]Skills loaded into context.[/dim]")
 
     # Attach an event logger to each model so watchers can follow activity
-    import contextlib
-
     for model in models.values():
         with contextlib.suppress(OSError):
             model.event_logger = EventLogger(session_name, model.name)
@@ -598,8 +599,6 @@ async def run_repl(
 
     def _toolbar() -> HTML:
         """Dynamic bottom toolbar showing counts only."""
-        import time
-
         if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < 2.0:
             return HTML("<ansired>Press Ctrl-C to exit</ansired>")
         waiting_names = {q.model_name for q in question_registry.pending()}
@@ -639,8 +638,6 @@ async def run_repl(
                 raw = await session_obj.prompt_async("> ")
                 _ctrl_c_at = None
             except KeyboardInterrupt:
-                import time
-
                 now = time.monotonic()
                 if _ctrl_c_at is not None and (now - _ctrl_c_at) < 2.0:
                     break

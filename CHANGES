@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.20.3 — 2026-05-18
+- Add `--skills` CLI option to `repl` command: accepts file or directory paths (repeatable); loaded after config-declared skills at highest priority
+- Add `skills:` key support in config files: paths resolved relative to the config file
+- Move all function-level imports to module level across `skills.py`, `session.py`, `repl.py`, `tools.py`, `cli.py`, and `providers/bedrock.py` (boto3/botocore remain function-level as an optional dependency guard)
+
 ## v0.20.2 — 2026-05-18
 - Add `review.md` skill: agents are instructed on code review standards covering language/dependency discipline, single source of truth, code reuse, and a named list of code smells to flag
 
