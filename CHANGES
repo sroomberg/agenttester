@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.20.2 — 2026-05-18
+- Add `review.md` skill: agents are instructed on code review standards covering language/dependency discipline, single source of truth, code reuse, and a named list of code smells to flag
+
 ## v0.20.1 — 2026-05-18
 - Fix `agent-tester cleanup` showing no sessions: remote branch listing now queries the remote live via `git ls-remote` instead of relying on cached tracking refs that were never populated by the clone-based workflow
 
