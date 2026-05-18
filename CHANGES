@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.19.2 — 2026-05-18
+- Do not use bash for git branch or push operations. Use the `git_commit` and `git_push` tools instead.
+
 ## v0.19.1 — 2026-05-18
 - Empty sessions (no user input sent) are not saved and show "Session was empty — not saved." instead of the resume message
 

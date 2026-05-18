@@ -14,4 +14,5 @@ You may run bash commands without asking for permission when they are directly r
 - **Do not run commands that modify state outside the repository** — no `rm -rf` on paths outside the worktree, no system-level installs (`apt`, `brew`, `sudo`), no network requests unrelated to dependency installation.
 - **Do not start long-running background services** (e.g. dev servers, daemons) unless the task explicitly requires it, and always stop them before finishing.
 - **Do not read or write files outside the repository worktree** unless they are well-known config files directly relevant to the task (e.g. `~/.npmrc`, `~/.pypirc`).
+- **Do not use bash for git branch or push operations.** Never run `git checkout -b`, `git branch`, `git switch -c`, or `git push` via bash. Use the `git_commit` and `git_push` tools instead - your branch is managed automatically.
 - If a command fails, diagnose and fix the root cause rather than retrying with `sudo` or ignoring the error.
