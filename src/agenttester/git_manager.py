@@ -76,6 +76,19 @@ class GitManager:
         """Return all local branch names under the agenttester/ prefix."""
         return [h.name for h in self.repo.heads if h.name.startswith("agenttester/")]
 
+    def list_remote_agenttester_branches(self, remote: str = "origin") -> list[str]:
+        """Return remote branch names under agenttester/ using cached tracking refs."""
+        try:
+            remote_obj = self.repo.remote(remote)
+            prefix = f"{remote}/agenttester/"
+            return [
+                ref.name[len(f"{remote}/") :]
+                for ref in remote_obj.refs
+                if ref.name.startswith(prefix)
+            ]
+        except Exception:
+            return []
+
     def delete_local_branch(self, branch: str) -> bool:
         """Remove any associated worktree then delete the local branch.
 

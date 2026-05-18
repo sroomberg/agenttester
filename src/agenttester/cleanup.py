@@ -32,12 +32,22 @@ def run_cleanup(workdir: Path, remote: str = "origin") -> None:
         return
 
     local_branches = set(git_mgr.list_agenttester_branches())
+    remote_branches = set(git_mgr.list_remote_agenttester_branches(remote))
+    all_branches = local_branches | remote_branches
 
     def _existing(s: ReplSession) -> list[str]:
-        return [b for b in s.branches if b in local_branches]
+        return [b for b in s.branches if b in all_branches]
 
-    n = len(sessions_with_branches)
-    console.print(f"[dim]Found {n} session(s) with recorded branches.[/dim]\n")
+    sessions_to_show = [s for s in sessions_with_branches if _existing(s)]
+
+    if not sessions_to_show:
+        console.print(
+            "[dim]No sessions with existing local or remote branches found.[/dim]"
+        )
+        return
+
+    n = len(sessions_to_show)
+    console.print(f"[dim]Found {n} session(s) with existing branches.[/dim]\n")
 
     # ── Phase 1: select sessions to delete entirely ───────────────────────────
     full_delete_ids: list[str] | None = checkboxlist_dialog(
@@ -49,9 +59,9 @@ def run_cleanup(workdir: Path, remote: str = "origin") -> None:
         values=[
             (
                 s.id,
-                f"{s.id}  ({len(s.branches)} recorded, {len(_existing(s))} local)",
+                f"{s.id}  ({len(_existing(s))} branch(es))",
             )
-            for s in sessions_with_branches
+            for s in sessions_to_show
         ],
     ).run()
 
@@ -59,9 +69,7 @@ def run_cleanup(workdir: Path, remote: str = "origin") -> None:
         console.print("[dim]Cancelled.[/dim]")
         return
 
-    remaining_sessions = [
-        s for s in sessions_with_branches if s.id not in full_delete_ids
-    ]
+    remaining_sessions = [s for s in sessions_to_show if s.id not in full_delete_ids]
 
     # ── Phase 2: individual branch selection for remaining sessions ───────────
     individual_branches: list[str] = []
@@ -88,10 +96,7 @@ def run_cleanup(workdir: Path, remote: str = "origin") -> None:
 
     # ── Collect all branches to delete ────────────────────────────────────────
     full_delete_branches = [
-        b
-        for s in sessions_with_branches
-        if s.id in full_delete_ids
-        for b in _existing(s)
+        b for s in sessions_to_show if s.id in full_delete_ids for b in _existing(s)
     ]
     all_to_delete = list(dict.fromkeys(full_delete_branches + individual_branches))
 

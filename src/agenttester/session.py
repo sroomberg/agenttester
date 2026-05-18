@@ -8,9 +8,29 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+_DEFAULT_MAX_SESSIONS = 5
+
 
 def _default_sessions_dir() -> Path:
     return Path.home() / ".config" / "agenttester" / "sessions"
+
+
+def _read_max_sessions() -> int:
+    """Read max_sessions from global config, falling back to the default."""
+    config_candidates = [
+        Path.home() / ".config" / "agenttester" / "config.yml",
+        Path.home() / ".config" / "agenttester" / "config.yaml",
+    ]
+    for path in config_candidates:
+        if path.exists():
+            with contextlib.suppress(Exception):
+                import yaml
+
+                data = yaml.safe_load(path.read_text()) or {}
+                val = data.get("max_sessions")
+                if isinstance(val, int) and val > 0:
+                    return val
+    return _DEFAULT_MAX_SESSIONS
 
 
 @dataclass
@@ -54,7 +74,9 @@ class ReplSession:
         except (FileNotFoundError, KeyError):
             return cls.create(name), True
 
-    def save(self, sessions_dir: Path | None = None) -> None:
+    def save(
+        self, sessions_dir: Path | None = None, max_sessions: int | None = None
+    ) -> None:
         d = sessions_dir or _default_sessions_dir()
         d.mkdir(parents=True, exist_ok=True)
         path = d / f"{self.id}.json"
@@ -69,6 +91,18 @@ class ReplSession:
                 indent=2,
             )
         )
+        limit = max_sessions if max_sessions is not None else _read_max_sessions()
+        self._prune_old(d, limit)
+
+    @classmethod
+    def _prune_old(cls, sessions_dir: Path, max_sessions: int) -> None:
+        """Delete the oldest sessions beyond max_sessions."""
+        all_sessions = cls.list_all(sessions_dir)
+        if len(all_sessions) <= max_sessions:
+            return
+        sorted_sessions = sorted(all_sessions, key=lambda s: s.created_at)
+        for s in sorted_sessions[: len(sorted_sessions) - max_sessions]:
+            s.delete(sessions_dir)
 
     def delete(self, sessions_dir: Path | None = None) -> None:
         path = (sessions_dir or _default_sessions_dir()) / f"{self.id}.json"
