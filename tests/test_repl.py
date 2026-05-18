@@ -572,7 +572,7 @@ class TestRunReplSkillSeeding:
 
 
 class TestRunReplSession:
-    async def test_session_saved_on_exit(self, tmp_path: Path) -> None:
+    async def test_empty_session_not_saved(self, tmp_path: Path) -> None:
         cfg = _make_config(
             tmp_path,
             {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
@@ -587,6 +587,36 @@ class TestRunReplSession:
             patch("agenttester.repl.load_skills", return_value=""),
             patch("agenttester.repl._check_connections", return_value={"m": True}),
             patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=sessions_dir,
+            ),
+        ):
+            mock_session_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg, session_name="my-session")
+
+        assert not (sessions_dir / "my-session.json").exists()
+
+    async def test_session_saved_when_prompts_sent(self, tmp_path: Path) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
+        )
+        sessions_dir = tmp_path / "sessions"
+        inputs = iter(["hello world", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch(
+                "agenttester.repl._query_async",
+                new_callable=AsyncMock,
+                return_value="ok",
+            ),
             patch(
                 "agenttester.session._default_sessions_dir",
                 return_value=sessions_dir,

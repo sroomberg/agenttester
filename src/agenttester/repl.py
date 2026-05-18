@@ -502,6 +502,7 @@ async def run_repl(
     _shutting_down = False
     _ctrl_c_at: float | None = None
     _ctrl_c_clear_task: asyncio.Task | None = None
+    _had_user_input = False
 
     def _toolbar() -> HTML:
         """Dynamic bottom toolbar showing counts only."""
@@ -705,6 +706,7 @@ async def run_repl(
                     else:
                         console.print(f"  [green]✓[/green] [bold]{_nm}[/bold]: done")
 
+                _had_user_input = True
                 _background_tasks.add(asyncio.create_task(_background_run()))
     finally:
         _stdout_ctx.__exit__(None, None, None)
@@ -724,20 +726,23 @@ async def run_repl(
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await asyncio.shield(task)
 
-        for name, model in models.items():
-            session.histories[name] = list(model.messages)
-        session.save()
+        if not _had_user_input:
+            console.print("\n[dim]Session was empty — not saved.[/dim]")
+        else:
+            for name, model in models.items():
+                session.histories[name] = list(model.messages)
+            session.save()
 
-        # Clean up stray local branches not in the session's expected set
-        if git_mgr is not None and session.branches and _session_branch_slug:
-            allowed = set(session.branches)
-            for branch in git_mgr.list_agenttester_branches():
-                if branch not in allowed and _session_branch_slug in branch:
-                    with contextlib.suppress(Exception):
-                        git_mgr.delete_local_branch(branch)
+            # Clean up stray local branches not in the session's expected set
+            if git_mgr is not None and session.branches and _session_branch_slug:
+                allowed = set(session.branches)
+                for branch in git_mgr.list_agenttester_branches():
+                    if branch not in allowed and _session_branch_slug in branch:
+                        with contextlib.suppress(Exception):
+                            git_mgr.delete_local_branch(branch)
 
-        # Remove per-model clone directories
+            console.print(f"\n[dim]bye  —  agent-tester --resume {session_name}[/dim]")
+
+        # Remove per-model clone directories regardless of whether we saved
         if git_mgr is not None:
             GitManager.cleanup_model_clones(session_name)
-
-        console.print(f"\n[dim]bye  —  agent-tester --resume {session_name}[/dim]")

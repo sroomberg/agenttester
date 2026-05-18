@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.19.1 — 2026-05-18
+- Empty sessions (no user input sent) are not saved and show "Session was empty — not saved." instead of the resume message
+
 ## v0.19.0 — 2026-05-18
 - Each model now gets a shallow clone of the repo in a per-model temp directory at startup; agents can no longer read or write each other's files
 - Branch creation (`git checkout -b agenttester/<model>/<slug>`) happens in the clone on first commit rather than lazily creating a worktree in the original repo
