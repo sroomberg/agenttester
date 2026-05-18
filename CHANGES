@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.18.0 — 2026-05-18
+- **Fix: streaming responses no longer cut off**: SSE parsing now uses line-based reading (`readline()`) instead of iterating over raw byte chunks, preventing data loss when chunk boundaries split SSE events mid-line; a JSON buffer accumulates partial payloads across lines
+- **`ask_user` tool**: models can now pause execution and wait for user input; when a model calls `ask_user`, the main REPL displays a status line showing how many models are waiting and their names; use `/reply @model <response>` to send a response
+- **Watcher shows waiting state**: `agent-tester watch` displays the full question text and reply instructions when a model is blocked on user input
+- Pending questions are cancelled on session exit so models don't block forever
+
 ## v0.17.0 — 2026-05-15
 - **Streaming responses**: all LLM calls in the agent loop now use SSE streaming (`stream: true`) for OpenAI-compatible endpoints and Anthropic's streaming Messages API; text arrives token-by-token rather than as a single block after full completion
 - **Live watcher streaming**: `agent-tester watch` displays text chunks inline as they arrive during the live tail phase; historical events are replayed as panels on attach; tool calls and tool results interrupt and resume streaming display cleanly

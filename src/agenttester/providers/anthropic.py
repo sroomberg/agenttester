@@ -158,7 +158,11 @@ class AnthropicProvider(Provider):
                 },
             ) as resp,
         ):
-            async for raw_line in resp.content:
+            buffer = ""
+            while True:
+                raw_line = await resp.content.readline()
+                if not raw_line:
+                    break
                 line = raw_line.decode("utf-8").rstrip("\r\n")
                 if not line.startswith("data: "):
                     continue
@@ -166,7 +170,14 @@ class AnthropicProvider(Provider):
                 try:
                     data = json.loads(payload)
                 except json.JSONDecodeError:
-                    continue
+                    buffer += payload
+                    try:
+                        data = json.loads(buffer)
+                        buffer = ""
+                    except json.JSONDecodeError:
+                        continue
+                else:
+                    buffer = ""
 
                 event_type = data.get("type", "")
 

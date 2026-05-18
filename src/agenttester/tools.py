@@ -10,6 +10,8 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from .questions import QuestionRegistry
+
 _MAX_OUTPUT_BYTES = 8192
 
 TOOL_DEFINITIONS: list[dict] = [
@@ -134,6 +136,28 @@ TOOL_DEFINITIONS: list[dict] = [
     },
 ]
 
+_ASK_USER_TOOL_DEF: dict = {
+    "type": "function",
+    "function": {
+        "name": "ask_user",
+        "description": (
+            "Ask the user a question and wait for their response."
+            " Use this when you need clarification, a decision, or approval"
+            " before continuing. The user will see your question and can reply."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to ask the user",
+                },
+            },
+            "required": ["question"],
+        },
+    },
+}
+
 _NOTIFY_TOOL_DEF: dict = {
     "type": "function",
     "function": {
@@ -176,6 +200,8 @@ class ToolExecutor:
         worktree_creator: Callable[[str], Path] | None = None,
         model_name: str | None = None,
         notify_url: str | None = None,
+        question_registry: QuestionRegistry | None = None,
+        on_event: Callable[[str, str], None] | None = None,
     ) -> None:
         self.workdir = str(Path(workdir).resolve())
         self.pem_path = pem_path
@@ -184,6 +210,8 @@ class ToolExecutor:
         self._worktree_created = False
         self._model_name = model_name
         self.notify_url = notify_url
+        self._question_registry = question_registry
+        self._on_event = on_event
         self._original_remote_urls: set[str] = self._get_remote_urls(self.workdir)
 
     @staticmethod
@@ -207,6 +235,8 @@ class ToolExecutor:
     @property
     def tool_definitions(self) -> list[dict]:
         base = list(TOOL_DEFINITIONS)
+        if self._question_registry is not None:
+            base.append(_ASK_USER_TOOL_DEF)
         if self.notify_url:
             base.append(_NOTIFY_TOOL_DEF)
         return base
@@ -237,6 +267,7 @@ class ToolExecutor:
             "git_commit": self._tool_git_commit,
             "git_push": self._tool_git_push,
             "notify": self._tool_notify,
+            "ask_user": self._tool_ask_user,
         }
         fn = dispatch.get(tool_name)
         if fn is None:
@@ -310,7 +341,23 @@ class ToolExecutor:
             return add
         return self._run(["git", "commit", "-m", message])
 
+    @property
+    def _allowed_branch(self) -> str | None:
+        """The only branch name this executor is allowed to push."""
+        if self._model_name and self._branch_slug:
+            from .git_manager import _sanitize_ref_component
+
+            safe_model = _sanitize_ref_component(self._model_name)
+            return f"agenttester/{safe_model}/{self._branch_slug}"
+        return None
+
     def _tool_git_push(self, branch: str, remote: str = "origin") -> str:
+        allowed = self._allowed_branch
+        if allowed and branch != allowed:
+            return (
+                f"Error: you may only push your assigned branch "
+                f"'{allowed}'. Got '{branch}'."
+            )
         url_result = subprocess.run(
             ["git", "remote", "get-url", remote],
             capture_output=True,
@@ -344,3 +391,13 @@ class ToolExecutor:
                 return f"Notified server: HTTP {resp.status}"
         except urllib.error.URLError as e:
             return f"Notify failed: {e}"
+
+    def _tool_ask_user(self, question: str) -> str:
+        if self._question_registry is None:
+            return "ask_user is not available in this context."
+        if self._on_event:
+            self._on_event("waiting", question)
+        result = self._question_registry.ask(self._model_name or "unknown", question)
+        if result is None:
+            return "[no response — timed out]"
+        return result

@@ -24,6 +24,14 @@ app = typer.Typer(
 console = Console()
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from importlib.metadata import version
+
+        print(f"agent-tester {version('agenttester')}")
+        raise typer.Exit()
+
+
 @app.callback()
 def default(
     ctx: typer.Context,
@@ -34,6 +42,16 @@ def default(
     resume: Annotated[
         str | None,
         typer.Option("--resume", "-r", help="Resume a previous session by ID"),
+    ] = None,
+    version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            "-v",
+            help="Show version and exit",
+            callback=_version_callback,
+            is_eager=True,
+        ),
     ] = None,
 ) -> None:
     """Open the interactive REPL when no subcommand is given."""
@@ -270,12 +288,51 @@ def repl(
 @app.command()
 def watch(
     session: Annotated[
-        str, typer.Option("--session", "-s", help="Session ID to watch")
-    ],
-    model: Annotated[str, typer.Option("--model", "-m", help="Model name to watch")],
+        str | None,
+        typer.Option("--session", "-s", help="Session ID (default: latest)"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Model name to watch"),
+    ] = None,
 ) -> None:
     """Follow a model's live activity from a separate terminal window."""
     from .watcher import run_watcher
+
+    sessions_dir = Path.home() / ".config" / "agenttester" / "sessions"
+
+    if not session:
+        # Find the most recently active session (by event dir mtime)
+        event_dirs = [
+            d for d in sessions_dir.iterdir() if d.is_dir() and (d / "events").is_dir()
+        ]
+        if not event_dirs:
+            console.print("[red]No sessions with event logs found.[/red]")
+            raise typer.Exit(1)
+        session = max(event_dirs, key=lambda d: (d / "events").stat().st_mtime).name
+        console.print(f"[dim]Using latest session: {session}[/dim]")
+
+    if not model:
+        # Pick the first (or only) model in the session's events dir
+        events_path = sessions_dir / session / "events"
+        if not events_path.is_dir():
+            console.print(f"[red]No event logs for session {session!r}.[/red]")
+            raise typer.Exit(1)
+        logs = sorted(events_path.glob("*.jsonl"))
+        if not logs:
+            console.print(f"[red]No model logs in session {session!r}.[/red]")
+            raise typer.Exit(1)
+        if len(logs) == 1:
+            model = logs[0].stem
+        else:
+            names = [f.stem for f in logs]
+            console.print("[bold]Available models:[/bold]")
+            for n in names:
+                console.print(f"  • {n}")
+            console.print(
+                "\n[yellow]Multiple models — specify one with -m/--model[/yellow]"
+            )
+            raise typer.Exit(1)
 
     run_watcher(session, model)
 

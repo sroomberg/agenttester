@@ -147,7 +147,7 @@ class TestToolCallThenText:
 
 
 class TestMaxTurns:
-    async def test_returns_sentinel_when_max_turns_reached(self) -> None:
+    async def test_returns_empty_when_max_turns_reached_no_registry(self) -> None:
         always_tool = {
             "content": None,
             "tool_calls": [
@@ -158,9 +158,9 @@ class TestMaxTurns:
         result = await run_agent_loop(
             provider, "m", [], "q", _make_executor(), max_turns=3
         )
-        assert "max turns" in result
+        assert result == ""
 
-    async def test_sentinel_appended_to_messages(self) -> None:
+    async def test_last_message_is_tool_result_when_max_turns_reached(self) -> None:
         always_tool = {
             "content": None,
             "tool_calls": [
@@ -173,5 +173,4 @@ class TestMaxTurns:
             provider, "m", messages, "q", _make_executor(), max_turns=2
         )
         last = messages[-1]
-        assert last["role"] == "assistant"
-        assert "max turns" in last["content"]
+        assert last["role"] == "tool"

@@ -11,7 +11,9 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
@@ -24,6 +26,7 @@ from .providers import (
     OpenAICompatProvider,
     Provider,
 )
+from .questions import QuestionRegistry
 from .session import ReplSession
 from .skills import load_skills
 from .tools import ToolExecutor
@@ -57,6 +60,8 @@ class Model:
     name: str
     model_id: str
     provider: Provider
+    max_tokens: int = 4096
+    max_turns: int = 100
     messages: list[dict] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
     event_logger: EventLogger | None = None
@@ -96,7 +101,13 @@ def _parse_models_from_file(path: Path) -> dict[str, Model]:
                 endpoint=endpoint,
                 api_key_env=model_cfg.get("api_key_env"),
             )
-        result[name] = Model(name=name, model_id=model_cfg["model"], provider=prov)
+        result[name] = Model(
+            name=name,
+            model_id=model_cfg["model"],
+            provider=prov,
+            max_tokens=model_cfg.get("max_tokens", 4096),
+            max_turns=model_cfg.get("max_turns", 100),
+        )
 
     # Backward compat: discover OpenAI-compatible models from agent commands
     for name, agent_data in (data.get("agents") or {}).items():
@@ -139,12 +150,13 @@ async def _query_async(
     prompt: str,
     max_tokens: int = 2048,
     on_event: Callable[[str, str], None] | None = None,
+    question_registry: QuestionRegistry | None = None,
 ) -> str:
     """Async query path: uses the full streaming agent loop for OpenAI/Anthropic
     providers; falls back to async_call for Bedrock and other providers.
     """
     if model.tool_executor and isinstance(
-        model.provider, (AnthropicProvider, OpenAICompatProvider)
+        model.provider, (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
     ):
         saved = list(model.messages)
         try:
@@ -154,13 +166,18 @@ async def _query_async(
                 model.messages,
                 prompt,
                 model.tool_executor,
+                max_turns=model.max_turns,
+                max_tokens=model.max_tokens,
                 on_event=on_event,
+                question_registry=question_registry,
+                model_name=model.name,
             )
         except Exception as e:
             model.messages[:] = saved
             return f"[error] {e}"
 
-    if isinstance(model.provider, (AnthropicProvider, OpenAICompatProvider)):
+    streaming_providers = (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
+    if isinstance(model.provider, streaming_providers):
         # Streaming, no tool use — stream text chunks directly.
         model.messages.append({"role": "user", "content": prompt})
         parts: list[str] = []
@@ -172,7 +189,7 @@ async def _query_async(
 
         try:
             result = await model.provider.async_stream_raw(
-                model.model_id, model.messages, max_tokens, on_chunk=_on_chunk
+                model.model_id, model.messages, model.max_tokens, on_chunk=_on_chunk
             )
             reply = result.get("content") or "".join(parts)
         except Exception as e:
@@ -216,9 +233,15 @@ async def _run_one(
     model: Model,
     prompt: str,
     on_event: Callable[[str, str], None] | None = None,
+    question_registry: QuestionRegistry | None = None,
 ) -> tuple[str, str]:
     try:
-        r = await _query_async(model, prompt, on_event=on_event)
+        r = await _query_async(
+            model,
+            prompt,
+            on_event=on_event,
+            question_registry=question_registry,
+        )
     except Exception as exc:
         r = str(exc)
     return name, r
@@ -261,9 +284,8 @@ async def _negotiate_branch_name(
 ) -> str:
     """Negotiate a branch name across all models (max 2 rounds).
 
-    Returns ``<short-hash>-<feature-name>``.
+    Returns the feature name slug (session ID is prepended by the caller).
     """
-    short_hash = git_mgr.short_head_hash()
     naming_instruction = (
         "Reply with ONLY a short kebab-case git branch name (2-5 words, no slashes "
         "or prefixes) describing the following task. Nothing else."
@@ -291,9 +313,8 @@ async def _negotiate_branch_name(
             console.print(f"  [dim]round 2 · {nm}: {name}[/dim]")
         feature = _best_name(list(proposals2.values()))
 
-    slug = f"{short_hash}-{feature}"
-    console.print(f"  [dim]→ {slug}[/dim]")
-    return slug
+    console.print(f"  [dim]→ {feature}[/dim]")
+    return feature
 
 
 def _make_event_handler(
@@ -366,6 +387,9 @@ async def run_repl(
             f"  ({n} message(s) across {len(session.histories)} model(s))[/dim]"
         )
 
+    # Shared question registry for ask_user tool
+    question_registry = QuestionRegistry()
+
     # Worktree + tool use setup — defaults to CWD so branches land in the
     # repo the REPL is invoked from when --workdir is not explicitly given.
     workdir_path = Path(workdir).resolve() if workdir else Path.cwd()
@@ -389,6 +413,7 @@ async def run_repl(
                     ),
                     model_name=mn,
                     notify_url=notify_url,
+                    question_registry=question_registry,
                 )
         else:
             git_mgr = None
@@ -402,6 +427,7 @@ async def run_repl(
                     pem_path=pem_path,
                     model_name=model.name,
                     notify_url=notify_url,
+                    question_registry=question_registry,
                 )
     except Exception:
         git_mgr = None
@@ -416,6 +442,7 @@ async def run_repl(
                 pem_path=pem_path,
                 model_name=model.name,
                 notify_url=notify_url,
+                question_registry=question_registry,
             )
 
     # Skill seeding
@@ -438,33 +465,63 @@ async def run_repl(
     for model in models.values():
         with contextlib.suppress(OSError):
             model.event_logger = EventLogger(session_name, model.name)
+            if model.tool_executor is not None:
+                model.tool_executor._on_event = _make_event_handler(model.event_logger)
 
     console.print(
-        "\n[dim]Commands: /reset (clear history), @model <msg> to address one model, "
-        "exit or Ctrl-C to quit[/dim]\n"
+        "\n[dim]Commands: /reset (clear history), /reply @model <response>,"
+        " @model <msg> to address one model, exit or Ctrl-C to quit[/dim]\n"
     )
 
     history_file = Path.home() / ".config" / "agenttester" / "repl_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
-    session_obj: PromptSession = PromptSession(
-        completer=_ModelCompleter(list(models)),
-        history=FileHistory(str(history_file)),
-    )
 
     # Branch slug negotiated once on the first prompt; reused for the whole session.
     _session_branch_slug: str | None = None
 
-    _ctrl_c_once = False
+    # Background tasks for model runs — kept alive across prompt iterations
+    _background_tasks: set[asyncio.Task] = set()
+    _shutting_down = False
+
+    def _toolbar() -> HTML:
+        """Dynamic bottom toolbar showing running/waiting status."""
+        active = [t for t in _background_tasks if not t.done()]
+        parts: list[str] = []
+        if active:
+            parts.append(f"<b>{len(active)} running</b>")
+        pending_qs = question_registry.pending()
+        if pending_qs:
+            names = ", ".join(q.model_name for q in pending_qs)
+            parts.append(f"<ansiyellow>{len(pending_qs)} waiting: {names}</ansiyellow>")
+        if not parts:
+            return HTML("<ansigreen>ready</ansigreen>")
+        return HTML(" | ".join(parts))
+
+    session_obj: PromptSession = PromptSession(
+        completer=_ModelCompleter(list(models)),
+        history=FileHistory(str(history_file)),
+        bottom_toolbar=_toolbar,
+    )
+
+    _ctrl_c_at: float | None = None
+    _stdout_ctx = patch_stdout(raw=True)
+    _stdout_ctx.__enter__()
     try:
         while True:
+            # Clean up finished background tasks
+            _background_tasks -= {t for t in _background_tasks if t.done()}
+
             try:
                 raw = await session_obj.prompt_async("> ")
-                _ctrl_c_once = False
+                _ctrl_c_at = None
             except KeyboardInterrupt:
-                if _ctrl_c_once:
+                import time
+
+                now = time.monotonic()
+                if _ctrl_c_at is not None and (now - _ctrl_c_at) < 2.0:
                     break
-                _ctrl_c_once = True
-                console.print("[dim](press Ctrl-C again to exit)[/dim]")
+                _ctrl_c_at = now
+                console.print("[dim](press Ctrl-C again within 2s to exit)[/dim]")
                 continue
             except EOFError:
                 break
@@ -478,6 +535,28 @@ async def run_repl(
                 for model in models.values():
                     model.messages = list(seed)
                 console.print("[dim]Context cleared.[/dim]\n")
+                continue
+
+            if raw.startswith("/reply "):
+                reply_rest = raw[7:].strip()
+                if reply_rest.startswith("@"):
+                    parts = reply_rest[1:].split(None, 1)
+                    target = parts[0] if parts else ""
+                    response_text = parts[1] if len(parts) > 1 else ""
+                    if not response_text:
+                        console.print(
+                            "[yellow]Usage: /reply @model <response>[/yellow]\n"
+                        )
+                        continue
+                    if question_registry.respond(target, response_text):
+                        console.print(f"[dim]Sent response to {target}.[/dim]\n")
+                    else:
+                        console.print(
+                            f"[yellow]{target} is not waiting for a"
+                            " response.[/yellow]\n"
+                        )
+                else:
+                    console.print("[yellow]Usage: /reply @model <response>[/yellow]\n")
                 continue
 
             # @model routing: "@name rest of message" targets a single model
@@ -502,12 +581,14 @@ async def run_repl(
 
             # Negotiate branch name once per session on the first prompt
             if _session_branch_slug is None:
+                short_session = session_name[:8]
                 if git_mgr is not None and git_mgr.has_commits():
-                    _session_branch_slug = await _negotiate_branch_name(
+                    feature_slug = await _negotiate_branch_name(
                         target_models, prompt_text, git_mgr, console
                     )
                 else:
-                    _session_branch_slug = _sanitize_ref_component(prompt_text[:60])
+                    feature_slug = _sanitize_ref_component(prompt_text[:60])
+                _session_branch_slug = f"{short_session}-{feature_slug}"
                 # Record potential branch names for all models once
                 for m in models.values():
                     branch_name = (
@@ -530,31 +611,66 @@ async def run_repl(
             n = len(target_models)
             label = "model" if n == 1 else "models"
             model_list = ", ".join(target_models)
-            console.print(f"[dim]Querying {n} {label}: {model_list}…[/dim]")
+            console.print(f"[dim]Querying {n} {label}: {model_list}…[/dim]\n")
 
-            tasks = [
-                asyncio.create_task(
-                    _run_one(nm, m, prompt_text, _make_event_handler(m.event_logger))
-                )
-                for nm, m in target_models.items()
-            ]
-            pending = list(target_models)
-            for coro in asyncio.as_completed(tasks):
-                name, reply = await coro
-                pending.remove(name)
-                m = target_models[name]
-                if m.event_logger is not None:
-                    m.event_logger.log("response", reply)
-                    m.event_logger.log("status", "waiting for next instructions")
-                if reply.startswith("[error]"):
-                    console.print(f"  [red]✗ {name}[/red]: {reply[:100]}")
-                else:
-                    console.print(f"  [green]✓[/green] [bold]{name}[/bold]: done")
-                if pending:
-                    console.print(f"  [dim]still working: {', '.join(pending)}[/dim]")
-            console.print()
+            for nm, m in target_models.items():
+
+                async def _background_run(
+                    _nm: str = nm,
+                    _m: Model = m,
+                    _prompt: str = prompt_text,
+                ) -> None:
+                    try:
+                        _, reply = await _run_one(
+                            _nm,
+                            _m,
+                            _prompt,
+                            _make_event_handler(_m.event_logger),
+                            question_registry,
+                        )
+                    except asyncio.CancelledError:
+                        if _m.event_logger is not None:
+                            _m.event_logger.log("status", "stopped")
+                        return
+                    if _m.event_logger is not None:
+                        _m.event_logger.log("response", reply)
+                        _m.event_logger.log("status", "waiting for next instructions")
+                    if reply.startswith("[error]"):
+                        console.print(f"  [red]✗ {_nm}[/red]: {reply[:100]}")
+                    else:
+                        console.print(f"  [green]✓[/green] [bold]{_nm}[/bold]: done")
+
+                _background_tasks.add(asyncio.create_task(_background_run()))
     finally:
+        _stdout_ctx.__exit__(None, None, None)
+        _shutting_down = True
+        question_registry.cancel_all()
+
+        # Give background tasks a moment to finish current tool execution
+        if _background_tasks:
+            console.print(
+                f"[dim]Waiting for {len(_background_tasks)} task(s) to stop…[/dim]"
+            )
+            _, still_running = await asyncio.wait(_background_tasks, timeout=5.0)
+            for task in still_running:
+                task.cancel()
+            # Suppress CancelledError from cancelled tasks
+            for task in _background_tasks:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.shield(task)
+
         for name, model in models.items():
             session.histories[name] = list(model.messages)
         session.save()
+
+        # Clean up stray local branches not in the session's expected set
+        if git_mgr is not None and session.branches and _session_branch_slug:
+            allowed = set(session.branches)
+            for branch in git_mgr.list_agenttester_branches():
+                if branch not in allowed and _session_branch_slug in branch:
+                    import contextlib as _ctx
+
+                    with _ctx.suppress(Exception):
+                        git_mgr.delete_local_branch(branch)
+
         console.print(f"\n[dim]bye  —  agent-tester --resume {session_name}[/dim]")

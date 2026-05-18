@@ -113,7 +113,8 @@ class TestRenderEvent:
 
     def test_tool_call_rendered(self) -> None:
         out = self._render({"type": "tool_call", "content": "bash: ls"})
-        assert "bash: ls" in out
+        assert "bash" in out
+        assert "ls" in out
 
     def test_tool_result_rendered(self) -> None:
         out = self._render({"type": "tool_result", "content": "file.py"})
@@ -126,3 +127,117 @@ class TestRenderEvent:
     def test_unknown_type_produces_no_output(self) -> None:
         out = self._render({"type": "unknown", "content": "x"})
         assert out.strip() == ""
+
+    def test_waiting_rendered(self) -> None:
+        out = self._render({"type": "waiting", "content": "which file?"})
+        assert "which file?" in out
+        assert "/reply @test-model" in out
+
+
+class TestFormatResponse:
+    """Test _format_response and _collapse_blank_lines."""
+
+    def test_collapse_blank_lines(self) -> None:
+        from agenttester.watcher import _collapse_blank_lines
+
+        text = "hello\n\n\n\n\nworld"
+        assert _collapse_blank_lines(text) == "hello\n\nworld"
+
+    def test_two_newlines_preserved(self) -> None:
+        from agenttester.watcher import _collapse_blank_lines
+
+        text = "hello\n\nworld"
+        assert _collapse_blank_lines(text) == "hello\n\nworld"
+
+    def test_function_calls_formatted(self) -> None:
+        from agenttester.watcher import _format_response
+
+        content = (
+            'Some text\n<function_calls>\n<invoke name="bash">\n'
+            '<parameter name="command">echo hello</parameter>\n'
+            "</invoke>\n</function_calls>\nMore text"
+        )
+        result = _format_response(content)
+        from rich.markdown import Markdown
+
+        assert isinstance(result, Markdown)
+
+    def test_function_calls_become_code(self) -> None:
+        from io import StringIO
+
+        from rich.console import Console
+
+        from agenttester.watcher import _format_response
+
+        content = (
+            '<function_calls>\n<invoke name="bash">\n'
+            '<parameter name="command">echo hello</parameter>\n'
+            "</invoke>\n</function_calls>"
+        )
+        result = _format_response(content)
+        buf = StringIO()
+        con = Console(file=buf, highlight=False, width=120)
+        con.print(result)
+        output = buf.getvalue()
+        assert "bash" in output
+        assert "echo hello" in output
+        assert "<function_calls>" not in output
+        assert "<invoke" not in output
+
+    def test_plain_text_uses_markdown(self) -> None:
+        from rich.markdown import Markdown
+
+        from agenttester.watcher import _format_response
+
+        result = _format_response("Here is some **bold** text")
+        assert isinstance(result, Markdown)
+
+    def test_stray_tags_stripped(self) -> None:
+        from io import StringIO
+
+        from rich.console import Console
+
+        from agenttester.watcher import _format_response
+
+        content = "I will <thinking>plan this</thinking> now"
+        result = _format_response(content)
+        buf = StringIO()
+        con = Console(file=buf, highlight=False, width=120)
+        con.print(result)
+        output = buf.getvalue()
+        assert "<thinking>" not in output
+        assert "plan this" in output
+
+
+class TestStreamFilter:
+    """Test _StreamFilter for live chunk processing."""
+
+    def test_strips_tags(self) -> None:
+        from agenttester.watcher import _StreamFilter
+
+        sf = _StreamFilter()
+        result = sf.feed("<function_calls>hello</function_calls>")
+        assert result == "hello"
+
+    def test_strips_tags_across_chunks(self) -> None:
+        from agenttester.watcher import _StreamFilter
+
+        sf = _StreamFilter()
+        r1 = sf.feed("text <func")
+        r2 = sf.feed("tion_calls>more")
+        assert r1 == "text "
+        assert r2 == "more"
+
+    def test_collapses_newlines(self) -> None:
+        from agenttester.watcher import _StreamFilter
+
+        sf = _StreamFilter()
+        result = sf.feed("a\n\n\n\nb")
+        assert result == "a\n\nb"
+
+    def test_preserves_normal_text(self) -> None:
+        from agenttester.watcher import _StreamFilter
+
+        sf = _StreamFilter()
+        result = sf.feed("hello world\nline two")
+        assert result == "hello world\nline two"

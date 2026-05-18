@@ -10,13 +10,13 @@ You may perform the following git operations without asking for permission:
 
 ### Your branch
 
-A branch is created automatically when you first write a file. Its name is derived from the task prompt:
+A branch is created automatically when you first write a file. It is based on the current HEAD commit of the local repository. Its name is derived from the task prompt:
 
 ```
-agenttester/<model-name>/<prompt-slug>
+agenttester/<model-name>/<session-id>-<feature-slug>
 ```
 
-Check your current branch with `git branch --show-current`. **Do not create new branches** — commit all changes to your assigned branch.
+Check your current branch with `git branch --show-current`. **Do not create new branches** — commit all changes to your assigned branch. Your branch is always based on the latest local commit at the time the session started.
 
 ### Merge conflicts
 
@@ -27,6 +27,12 @@ Resolve conflicts automatically without asking for confirmation:
 3. Stage resolved files with `git add <file>`.
 4. Continue the operation (`git rebase --continue` or `git merge --continue`).
 5. If a conflict cannot be resolved safely (e.g., incompatible semantic changes), abort with `git rebase --abort` or `git merge --abort` and report the situation.
+
+### Pushing your work
+
+**Always push your branch to the remote when you are done.** After your final commit, run `git push -u origin <branch-name>` using the `git_push` tool. Do not wait to be asked — push automatically as the last step before reporting completion.
+
+If you make multiple commits during a task, you only need to push once at the end.
 
 ### Rules
 
