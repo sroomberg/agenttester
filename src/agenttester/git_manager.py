@@ -6,6 +6,8 @@ import contextlib
 import os
 import re
 import shlex
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -75,6 +77,39 @@ class GitManager:
     def list_agenttester_branches(self) -> list[str]:
         """Return all local branch names under the agenttester/ prefix."""
         return [h.name for h in self.repo.heads if h.name.startswith("agenttester/")]
+
+    def clone_for_model(self, model_name: str, session_id: str) -> Path:
+        """Create a fresh shallow clone of this repo in a temp dir for one model.
+
+        Each model gets its own isolated working directory so concurrent agents
+        never read or write each other's files.
+        """
+        dest = (
+            Path(tempfile.gettempdir())
+            / "agenttester"
+            / session_id
+            / _sanitize_ref_component(model_name)
+        )
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        # Prefer the remote URL so the clone can push to the real remote.
+        # Fall back to a file:// URI for repos with no configured remote.
+        try:
+            clone_url = self.repo.remote("origin").url
+        except Exception:
+            clone_url = self.repo_path.as_uri()
+
+        self.repo.git.clone("--depth", "1", clone_url, str(dest))
+        return dest
+
+    @staticmethod
+    def cleanup_model_clones(session_id: str) -> None:
+        """Remove all temp clone directories created for a session."""
+        session_dir = Path(tempfile.gettempdir()) / "agenttester" / session_id
+        if session_dir.exists():
+            shutil.rmtree(session_dir, ignore_errors=True)
 
     def list_remote_agenttester_branches(self, remote: str = "origin") -> list[str]:
         """Return remote branch names under agenttester/ using cached tracking refs."""

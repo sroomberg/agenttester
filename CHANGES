@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.19.0 — 2026-05-18
+- Each model now gets a shallow clone of the repo in a per-model temp directory at startup; agents can no longer read or write each other's files
+- Branch creation (`git checkout -b agenttester/<model>/<slug>`) happens in the clone on first commit rather than lazily creating a worktree in the original repo
+- Clone directories are removed when the REPL exits
+- Removed `worktree_creator` from `ToolExecutor`; replaced `_ensure_worktree` with `_ensure_branch`
+
 ## v0.18.5 — 2026-05-18
 - Ctrl-C shows "Press Ctrl-C to exit" in the toolbar instead of printing; message disappears automatically after 2s
 

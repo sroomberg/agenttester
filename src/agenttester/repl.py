@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import tempfile
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -419,24 +420,18 @@ async def run_repl(
     try:
         git_mgr = GitManager(workdir_path)
         if git_mgr.has_commits():
-            console.print(
-                f"\n[dim]Tools active in {workdir_path};"
-                " branches created on first write.[/dim]"
-            )
+            console.print(f"\n[dim]Cloning {workdir_path} for each model…[/dim]")
             for model in models.values():
-                mn = model.name
+                clone_path = git_mgr.clone_for_model(model.name, session_name)
                 model.tool_executor = ToolExecutor(
-                    workdir=str(workdir_path),
+                    workdir=str(clone_path),
                     pem_path=pem_path,
-                    worktree_creator=(
-                        lambda slug, _gm=git_mgr, _mn=mn: _gm.get_or_create_worktree(
-                            _mn, slug
-                        )
-                    ),
-                    model_name=mn,
+                    model_name=model.name,
                     notify_url=notify_url,
                     question_registry=question_registry,
                 )
+            clones_dir = Path(tempfile.gettempdir()) / "agenttester" / session_name
+            console.print(f"[dim]Each model working in {clones_dir}[/dim]")
         else:
             git_mgr = None
             console.print(
@@ -738,9 +733,11 @@ async def run_repl(
             allowed = set(session.branches)
             for branch in git_mgr.list_agenttester_branches():
                 if branch not in allowed and _session_branch_slug in branch:
-                    import contextlib as _ctx
-
-                    with _ctx.suppress(Exception):
+                    with contextlib.suppress(Exception):
                         git_mgr.delete_local_branch(branch)
+
+        # Remove per-model clone directories
+        if git_mgr is not None:
+            GitManager.cleanup_model_clones(session_name)
 
         console.print(f"\n[dim]bye  —  agent-tester --resume {session_name}[/dim]")
