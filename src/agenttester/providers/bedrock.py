@@ -206,6 +206,7 @@ class BedrockProvider(Provider):
         current_tool: dict | None = None
         input_tokens = 0
         output_tokens = 0
+        stop_reason = ""
 
         for event in response["stream"]:
             if "contentBlockStart" in event:
@@ -236,6 +237,9 @@ class BedrockProvider(Provider):
                     tool_calls.append(current_tool)
                     current_tool = None
 
+            elif "messageStop" in event:
+                stop_reason = event["messageStop"].get("stopReason", "")
+
             elif "metadata" in event:
                 usage = event["metadata"].get("usage", {})
                 input_tokens += usage.get("inputTokens", 0)
@@ -247,6 +251,7 @@ class BedrockProvider(Provider):
             "tool_calls": tool_calls if tool_calls else None,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "stop_reason": stop_reason,
         }
 
     async def async_stream_raw(

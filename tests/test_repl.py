@@ -17,6 +17,7 @@ from agenttester.providers import (
 from agenttester.repl import (
     Model,
     _ModelCompleter,
+    _negotiate_branch_name,
     _query_async,
     _run_evaluate,
     _run_one,
@@ -987,3 +988,357 @@ class TestIterateCommand:
                 await run_repl(cfg)
 
         assert any("Usage" in str(m) for m in out)
+
+
+# ---------------------------------------------------------------------------
+# Branch slug negotiation
+# ---------------------------------------------------------------------------
+
+
+def _make_model_for_branch(name: str, provider: MagicMock | None = None) -> Model:
+    prov = provider or MagicMock()
+    prov.async_call = AsyncMock(return_value="")
+    return Model(name=name, model_id="m", provider=prov)
+
+
+class TestNegotiateBranchName:
+    """_negotiate_branch_name returns {model_name: full_slug} per model."""
+
+    async def test_consensus_when_all_agree(self) -> None:
+        prov = MagicMock()
+        prov.async_call = AsyncMock(return_value="fix-auth")
+        models = {
+            "a": Model(name="a", model_id="m", provider=prov),
+            "b": Model(name="b", model_id="m", provider=prov),
+        }
+        git_mgr = MagicMock()
+        console = MagicMock()
+        result = await _negotiate_branch_name(
+            models, "fix the auth module", git_mgr, console, "abc12345"
+        )
+        assert result == {"a": "abc12345-fix-auth", "b": "abc12345-fix-auth"}
+
+    async def test_fallback_slug_for_failed_models(self) -> None:
+        """Models that raise during negotiation get a prompt-derived fallback."""
+        good_prov = MagicMock()
+        good_prov.async_call = AsyncMock(return_value="add-logging")
+        bad_prov = MagicMock()
+        bad_prov.async_call = AsyncMock(side_effect=Exception("auth error"))
+        models = {
+            "good": Model(name="good", model_id="m", provider=good_prov),
+            "bad": Model(name="bad", model_id="m", provider=bad_prov),
+        }
+        result = await _negotiate_branch_name(
+            models, "add logging to the server", MagicMock(), MagicMock(), "abc12345"
+        )
+        # good model gets the consensus; bad model gets the prompt-derived fallback
+        assert result["good"] == "abc12345-add-logging"
+        assert result["bad"].startswith("abc12345-")
+        assert result["bad"] != result["good"]
+
+    async def test_all_failed_uses_prompt_fallback(self) -> None:
+        """When every model fails, all get a prompt-derived slug, never 'unnamed'."""
+        prov = MagicMock()
+        prov.async_call = AsyncMock(side_effect=Exception("no auth"))
+        models = {"a": Model(name="a", model_id="m", provider=prov)}
+        result = await _negotiate_branch_name(
+            models, "refactor the database layer", MagicMock(), MagicMock(), "abc12345"
+        )
+        assert "unnamed" not in result["a"]
+        assert result["a"].startswith("abc12345-")
+
+
+class TestBranchSlugRestoration:
+    """Branch slugs from session.branches are restored so models don't re-negotiate."""
+
+    def _make_cfg(self, tmp_path: Path) -> Path:
+        return _make_config(
+            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
+        )
+
+    async def test_existing_branch_restored_to_executor(self, tmp_path: Path) -> None:
+        """On resume, mark_branch_ready is called so the branch isn't re-created."""
+        cfg = self._make_cfg(tmp_path)
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        # Pre-seed a session with an existing branch
+        session = ReplSession.create("test-session-123")
+        session.branches = ["agenttester/m/abc12345-fix-auth"]
+
+        executor_calls: list[tuple[str, bool]] = []
+
+        class _TrackingExecutor:
+            def __init__(self, **kw):
+                self._branch_slug: str | None = None
+                self._branch_created = False
+                self.workdir = kw.get("workdir", ".")
+
+            def mark_branch_ready(self, slug: str) -> None:
+                executor_calls.append(("mark_branch_ready", slug))
+                self._branch_slug = slug
+                self._branch_created = True
+
+            def set_branch_slug(self, slug: str) -> None:
+                executor_calls.append(("set_branch_slug", slug))
+
+            def set_event_handler(self, _h) -> None:
+                pass
+
+        inputs = iter(["exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        def fake_setup_git(workdir, models, session_name, *_a, **_kw):
+            # Attach a TrackingExecutor to each model so the slug restore code runs.
+            for m in models.values():
+                m.tool_executor = _TrackingExecutor(workdir=".")
+            return None
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch("agenttester.repl._setup_git_and_tools", side_effect=fake_setup_git),
+            patch(
+                "agenttester.repl._init_session",
+                return_value=(session, "test-session-123", False),
+            ),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=sessions_dir,
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg)
+
+        # mark_branch_ready must have been called (not set_branch_slug) for
+        # the restored branch — proves we don't re-create the branch.
+        assert any(
+            call[0] == "mark_branch_ready" and "abc12345-fix-auth" in str(call[1])
+            for call in executor_calls
+        )
+
+    async def test_unnamed_slug_triggers_renegotiation(self, tmp_path: Path) -> None:
+        """A '-unnamed' branch slug is skipped — treated as a failed negotiation."""
+        cfg = self._make_cfg(tmp_path)
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        session = ReplSession.create("test-session-456")
+        session.branches = ["agenttester/m/abc12345-unnamed"]
+
+        executor_calls: list[tuple] = []
+
+        class _TrackingExecutor2:
+            def __init__(self, **kw):
+                self._branch_slug: str | None = None
+                self._branch_created = False
+                self.workdir = kw.get("workdir", ".")
+
+            def mark_branch_ready(self, slug: str) -> None:
+                executor_calls.append(("mark_branch_ready", slug))
+
+            def set_branch_slug(self, slug: str) -> None:
+                executor_calls.append(("set_branch_slug", slug))
+
+            def set_event_handler(self, _h) -> None:
+                pass
+
+        inputs = iter(["exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        def fake_setup_git2(workdir, models, session_name, *_a, **_kw):
+            for m in models.values():
+                m.tool_executor = _TrackingExecutor2(workdir=".")
+            return None
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch("agenttester.repl._setup_git_and_tools", side_effect=fake_setup_git2),
+            patch(
+                "agenttester.repl._init_session",
+                return_value=(session, "test-session-456", False),
+            ),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=sessions_dir,
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg)
+
+        # A slug ending in '-unnamed' must NOT be restored via mark_branch_ready
+        assert not any(
+            call[0] == "mark_branch_ready" and "unnamed" in str(call[1])
+            for call in executor_calls
+        )
+
+
+# ---------------------------------------------------------------------------
+# /stop and /interrupt commands
+# ---------------------------------------------------------------------------
+
+
+class TestStopCommand:
+    def _make_cfg(self, tmp_path: Path) -> Path:
+        return _make_config(
+            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
+        )
+
+    async def test_stop_no_running_models_prints_message(self, tmp_path: Path) -> None:
+        cfg = self._make_cfg(tmp_path)
+        out: list[str] = []
+        inputs = iter(["/stop", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            console_mock = MagicMock()
+            console_mock.print = lambda *a, **kw: out.extend(a)
+            with patch("agenttester.repl.Console", return_value=console_mock):
+                await run_repl(cfg)
+
+        assert any("No running" in str(m) for m in out)
+
+    async def test_stop_with_unknown_tag_is_noop(self, tmp_path: Path) -> None:
+        cfg = self._make_cfg(tmp_path)
+        out: list[str] = []
+        inputs = iter(["/stop @nonexistent", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            console_mock = MagicMock()
+            console_mock.print = lambda *a, **kw: out.extend(a)
+            with patch("agenttester.repl.Console", return_value=console_mock):
+                await run_repl(cfg)
+
+        assert any("No running" in str(m) for m in out)
+
+
+class TestInterruptCommand:
+    def _make_cfg(self, tmp_path: Path) -> Path:
+        return _make_config(
+            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
+        )
+
+    async def test_interrupt_without_message_shows_usage(self, tmp_path: Path) -> None:
+        cfg = self._make_cfg(tmp_path)
+        out: list[str] = []
+        inputs = iter(["/interrupt", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            console_mock = MagicMock()
+            console_mock.print = lambda *a, **kw: out.extend(a)
+            with patch("agenttester.repl.Console", return_value=console_mock):
+                await run_repl(cfg)
+
+        assert any("Usage" in str(m) for m in out)
+
+    async def test_interrupt_with_message_dispatches_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        """After /interrupt <msg> the message is dispatched as a new query."""
+        cfg = self._make_cfg(tmp_path)
+        dispatched: list[str] = []
+        inputs = iter(["/interrupt focus on tests instead", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        async def fake_query(model, prompt, **_kw):
+            dispatched.append(prompt)
+            return "ok"
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch("agenttester.repl._query_async", side_effect=fake_query),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg)
+
+        assert any("focus on tests instead" in p for p in dispatched)
+
+    async def test_interrupt_tag_only_messages_named_model(
+        self, tmp_path: Path
+    ) -> None:
+        """@model tag restricts interrupt to that model only."""
+        cfg = _make_config(
+            tmp_path,
+            {
+                "a": {"command": _vllm_command("http://h:8001", "a")},
+                "b": {"command": _vllm_command("http://h:8002", "b")},
+            },
+        )
+        dispatched: dict[str, list[str]] = {}
+        inputs = iter(["/interrupt @a fix the bug", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        async def fake_query(model, prompt, **_kw):
+            dispatched.setdefault(model.name, []).append(prompt)
+            return "ok"
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch(
+                "agenttester.repl._check_connections",
+                return_value={"a": True, "b": True},
+            ),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch("agenttester.repl._query_async", side_effect=fake_query),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg)
+
+        assert any("fix the bug" in p for p in dispatched.get("a", []))
+        assert not any("fix the bug" in p for p in dispatched.get("b", []))

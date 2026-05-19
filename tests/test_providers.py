@@ -641,3 +641,100 @@ class TestModelTokenAccumulation:
         await _query_async(model, "second")
         assert model.input_tokens == 60
         assert model.output_tokens == 20
+
+
+# ---------------------------------------------------------------------------
+# AzureProvider
+# ---------------------------------------------------------------------------
+
+
+class TestAzureProvider:
+    def test_api_key_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agenttester.providers.azure import AzureProvider
+
+        monkeypatch.setenv("MY_AZURE_KEY", "secret123")
+        p = AzureProvider(
+            endpoint="https://my.openai.azure.com",
+            api_key_env="MY_AZURE_KEY",
+            auth_method="api_key",
+        )
+        headers = p._headers()
+        assert headers["api-key"] == "secret123"
+        assert "Authorization" not in headers
+
+    def test_api_key_missing_sends_no_auth_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agenttester.providers.azure import AzureProvider
+
+        monkeypatch.delenv("AZURE_OPENAI_KEY", raising=False)
+        p = AzureProvider(
+            endpoint="https://my.openai.azure.com",
+            api_key_env="AZURE_OPENAI_KEY",
+        )
+        headers = p._headers()
+        assert "api-key" not in headers
+        assert "Authorization" not in headers
+
+    def test_cli_auth_sends_bearer(self) -> None:
+        from agenttester.providers.azure import AzureProvider
+
+        with patch(
+            "agenttester.providers.azure._fetch_cli_token", return_value="tok123"
+        ):
+            p = AzureProvider(
+                endpoint="https://my.openai.azure.com",
+                auth_method="cli",
+            )
+            headers = p._headers()
+        assert headers["Authorization"] == "Bearer tok123"
+        assert "api-key" not in headers
+
+    def test_content_type_always_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agenttester.providers.azure import AzureProvider
+
+        monkeypatch.setenv("K", "v")
+        p = AzureProvider(endpoint="https://ep", api_key_env="K")
+        assert p._headers()["Content-Type"] == "application/json"
+
+
+# ---------------------------------------------------------------------------
+# VertexProvider
+# ---------------------------------------------------------------------------
+
+
+class TestVertexProvider:
+    def test_api_key_delegates_to_openai_compat(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agenttester.providers.vertex import VertexProvider
+
+        monkeypatch.setenv("VERTEX_KEY", "vkey")
+        p = VertexProvider(
+            endpoint="https://us-central1-aiplatform.googleapis.com/v1beta1/openapi",
+            api_key_env="VERTEX_KEY",
+            auth_method="api_key",
+        )
+        headers = p._headers()
+        assert headers["Authorization"] == "Bearer vkey"
+
+    def test_cli_auth_sends_bearer(self) -> None:
+        from agenttester.providers.vertex import VertexProvider
+
+        with patch(
+            "agenttester.providers.vertex._fetch_cli_token", return_value="gcp-token"
+        ):
+            p = VertexProvider(
+                endpoint="https://us-central1-aiplatform.googleapis.com/v1beta1/openapi",
+                auth_method="cli",
+            )
+            headers = p._headers()
+        assert headers["Authorization"] == "Bearer gcp-token"
+
+    def test_content_type_set_on_cli_auth(self) -> None:
+        from agenttester.providers.vertex import VertexProvider
+
+        with patch("agenttester.providers.vertex._fetch_cli_token", return_value="t"):
+            p = VertexProvider(endpoint="https://ep", auth_method="cli")
+            headers = p._headers()
+        assert headers["Content-Type"] == "application/json"

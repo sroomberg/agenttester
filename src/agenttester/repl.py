@@ -56,6 +56,8 @@ _SLASH_COMMANDS = [
     ("/report", "show each model's work summary (commits + diff stats)"),
     ("/evaluate", "cross-evaluate: each model reviews the others' work"),
     ("/iterate", "send iteration prompt incorporating peer evaluations"),
+    ("/stop", "cancel running model(s) — optionally tag: /stop @model"),
+    ("/interrupt", "cancel and immediately re-dispatch: /interrupt [@model] <msg>"),
 ]
 
 
@@ -359,11 +361,15 @@ async def _negotiate_branch_name(
     prompt: str,
     git_mgr: GitManager,
     console: Console,
-) -> str:
-    """Negotiate a branch name across all models (max 2 rounds).
+    short_session: str,
+) -> dict[str, str]:
+    """Negotiate branch slugs. Returns {model_name: full_slug} for every model.
 
-    Returns the feature name slug (session ID is prepended by the caller).
+    Models that respond share the consensus slug. Models that fail (auth error,
+    timeout, etc.) receive a prompt-derived fallback so every model lands on a
+    deterministic, human-readable branch rather than being left without one.
     """
+    fallback = _sanitize_ref_component(prompt[:_BRANCH_SLUG_MAX_LEN]) or "session"
     naming_instruction = (
         "Reply with ONLY a short kebab-case git branch name (2-5 words, no slashes "
         "or prefixes) describing the following task. Nothing else."
@@ -376,9 +382,16 @@ async def _negotiate_branch_name(
     for nm, name in proposals.items():
         console.print(f"  [dim]round 1 · {nm}: {name}[/dim]")
 
+    participating: set[str] = set(proposals.keys())
     unique = set(proposals.values())
-    if len(unique) == 1 or len(models) == 1:
-        feature = _best_name(list(proposals.values()))
+    if not proposals:
+        consensus = fallback
+        console.print(
+            f"  [dim]→ {consensus} (fallback — all models failed to respond)[/dim]"
+        )
+    elif len(unique) == 1 or len(models) == 1:
+        consensus = _best_name(list(proposals.values()))
+        console.print(f"  [dim]→ {consensus}[/dim]")
     else:
         proposal_lines = "\n".join(f"- {nm}: {p}" for nm, p in proposals.items())
         round2_prompt = (
@@ -389,10 +402,15 @@ async def _negotiate_branch_name(
         proposals2 = await _gather_names(models, round2_prompt)
         for nm, name in proposals2.items():
             console.print(f"  [dim]round 2 · {nm}: {name}[/dim]")
-        feature = _best_name(list(proposals2.values()))
+        participating.update(proposals2.keys())
+        consensus = _best_name(list(proposals2.values())) if proposals2 else fallback
+        console.print(f"  [dim]→ {consensus}[/dim]")
 
-    console.print(f"  [dim]→ {feature}[/dim]")
-    return feature
+    result: dict[str, str] = {}
+    for nm in models:
+        feature = consensus if nm in participating else fallback
+        result[nm] = f"{short_session}-{feature}"
+    return result
 
 
 def _make_event_handler(
@@ -830,9 +848,28 @@ async def run_repl(
     history_file = GLOBAL_CONFIG_DIR / "repl_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
-    _session_branch_slug: str | None = None
+    _model_slugs: dict[str, str] = {}
+    _remote_url = git_mgr.remote_url() if git_mgr is not None else ""
+
+    # Restore per-model branch slugs from the saved session so models that
+    # already have branches don't re-negotiate on resume.
+    for _br in session.branches:
+        _parts = _br.split("/", 2)
+        if len(_parts) == 3:
+            _slug = _parts[2]
+            if not _slug or _slug.endswith("-unnamed"):
+                continue  # skip slugs that indicate a failed negotiation
+            for _nm, _m in models.items():
+                if _sanitize_ref_component(_nm) == _parts[1]:
+                    _model_slugs[_nm] = _slug
+                    if _m.tool_executor is not None:
+                        _m.tool_executor.mark_branch_ready(_slug)
+                    break
+
     _background_tasks: set[asyncio.Task] = set()
+    _model_tasks: dict[str, asyncio.Task] = {}
     _busy_models: set[str] = set()
+    _pending_interrupt: tuple[frozenset[str], str] | None = None
     _ctrl_c_at: float | None = None
     _ctrl_c_clear_task: asyncio.Task | None = None
     _had_user_input = False
@@ -878,20 +915,31 @@ async def run_repl(
         while True:
             _background_tasks -= {t for t in _background_tasks if t.done()}
 
-            try:
-                raw = await _prompt_session.prompt_async("> ")
-                _ctrl_c_at = None
-            except KeyboardInterrupt:
-                now = time.monotonic()
-                if _ctrl_c_at is not None and (now - _ctrl_c_at) < _CTRL_C_TIMEOUT:
+            # Pending interrupt: dispatch immediately without blocking on user input.
+            if _pending_interrupt is not None:
+                _itargets, _imsg = _pending_interrupt
+                _pending_interrupt = None
+                if _itargets < set(models.keys()):
+                    raw = " ".join(f"@{nm}" for nm in sorted(_itargets)) + " " + _imsg
+                else:
+                    raw = _imsg
+            else:
+                try:
+                    raw = await _prompt_session.prompt_async("> ")
+                    _ctrl_c_at = None
+                except KeyboardInterrupt:
+                    now = time.monotonic()
+                    if _ctrl_c_at is not None and (now - _ctrl_c_at) < _CTRL_C_TIMEOUT:
+                        break
+                    if _ctrl_c_clear_task is not None:
+                        _ctrl_c_clear_task.cancel()
+                    _ctrl_c_at = now
+                    _ctrl_c_clear_task = asyncio.create_task(
+                        _clear_ctrl_c_after_delay()
+                    )
+                    continue
+                except EOFError:
                     break
-                if _ctrl_c_clear_task is not None:
-                    _ctrl_c_clear_task.cancel()
-                _ctrl_c_at = now
-                _ctrl_c_clear_task = asyncio.create_task(_clear_ctrl_c_after_delay())
-                continue
-            except EOFError:
-                break
 
             raw = raw.strip()
             if not raw or raw == "exit":
@@ -963,7 +1011,12 @@ async def run_repl(
                                     )
 
                             _had_user_input = True
-                            _background_tasks.add(asyncio.create_task(_iterate_run()))
+                            _it2 = asyncio.create_task(_iterate_run())
+                            _background_tasks.add(_it2)
+                            _model_tasks[nm] = _it2
+                            _it2.add_done_callback(
+                                lambda t, _n=nm: _model_tasks.pop(_n, None)
+                            )
                     continue
                 elif raw.lower() == "n":
                     console.print("[dim]Iteration cancelled.[/dim]\n")
@@ -997,6 +1050,54 @@ async def run_repl(
                 console.print()
                 continue
 
+            if raw == "/stop" or raw.startswith("/stop "):
+                _stop_rest = raw[5:].strip()
+                _stop_tags = {w[1:] for w in _stop_rest.split() if w.startswith("@")}
+                _stop_targets = (
+                    (_stop_tags & set(models)) if _stop_tags else set(_busy_models)
+                )
+                _stopped = []
+                for _snm in list(_stop_targets):
+                    _st = _model_tasks.get(_snm)
+                    if _st and not _st.done():
+                        _st.cancel()
+                        _stopped.append(_snm)
+                if _stopped:
+                    console.print(
+                        f"[dim]Stopped: {', '.join(sorted(_stopped))}[/dim]\n"
+                    )
+                else:
+                    console.print("[dim]No running models to stop.[/dim]\n")
+                continue
+
+            if raw == "/interrupt" or raw.startswith("/interrupt "):
+                _int_rest = raw[len("/interrupt") :].strip()
+                _int_words = _int_rest.split()
+                _int_tags = [w for w in _int_words if w.startswith("@")]
+                _int_msg = " ".join(
+                    w for w in _int_words if not w.startswith("@")
+                ).strip()
+                if not _int_msg:
+                    console.print(
+                        "[yellow]Usage: /interrupt [@model ...] <message>[/yellow]\n"
+                    )
+                    continue
+                _int_targets: frozenset[str] = (
+                    frozenset(w[1:] for w in _int_tags if w[1:] in models)
+                    if _int_tags
+                    else frozenset(models)
+                )
+                for _inm in _int_targets:
+                    _it = _model_tasks.get(_inm)
+                    if _it and not _it.done():
+                        _it.cancel()
+                        _busy_models.discard(_inm)
+                _pending_interrupt = (_int_targets, _int_msg)
+                console.print(
+                    f"[dim]Interrupting {', '.join(sorted(_int_targets))}…[/dim]\n"
+                )
+                continue
+
             if raw == "/report":
                 console.print("[dim]Collecting work reports…[/dim]\n")
 
@@ -1026,7 +1127,9 @@ async def run_repl(
 
                 _eval_dir: Path | None = None
                 if git_mgr is not None:
-                    _eval_slug = _session_branch_slug or session_name[:8]
+                    _eval_slug = (
+                        next(iter(_model_slugs.values()), None) or session_name[:8]
+                    )
                     _eval_dir = (
                         git_mgr.repo_path / ".agenttester" / "evaluations" / _eval_slug
                     )
@@ -1107,29 +1210,51 @@ async def run_repl(
                 continue
             prompt_text, target_models = resolved
 
-            # Negotiate branch name once per session on the first prompt
-            if _session_branch_slug is None:
-                short_session = session_name[:8]
-                if git_mgr is not None and git_mgr.has_commits():
-                    feature_slug = await _negotiate_branch_name(
-                        target_models, prompt_text, git_mgr, console
-                    )
-                else:
-                    feature_slug = _sanitize_ref_component(
-                        prompt_text[:_BRANCH_SLUG_MAX_LEN]
-                    )
-                _session_branch_slug = f"{short_session}-{feature_slug}"
-                _remote_url = git_mgr.remote_url() if git_mgr is not None else ""
-                for m in models.values():
-                    b = branch_name(m.name, _session_branch_slug)
-                    if b not in session.branches:
-                        session.branches.append(b)
-                        if _remote_url:
-                            record_branch(b, _remote_url, session_name)
+            # Validate that every target model has a branch slug before it
+            # starts editing. Models without one are negotiated on the fly;
+            # models that fail negotiation receive a prompt-derived fallback.
+            if git_mgr is not None and git_mgr.has_commits():
+                all_models_needing_slug = {
+                    nm: m
+                    for nm, m in models.items()
+                    if nm not in _model_slugs and m.tool_executor is not None
+                }
+                if all_models_needing_slug:
+                    short_session = session_name[:8]
+                    if _model_slugs:
+                        # Session already has slugs — use the same one so all
+                        # models land on branches with a consistent feature name.
+                        existing = next(iter(_model_slugs.values()))
+                        new_slugs: dict[str, str] = {
+                            nm: existing for nm in all_models_needing_slug
+                        }
+                    else:
+                        # First negotiation — consult active target models;
+                        # apply result (consensus or per-model fallback) to all.
+                        active = {
+                            nm: m
+                            for nm, m in all_models_needing_slug.items()
+                            if nm in target_models
+                        } or all_models_needing_slug
+                        per_model = await _negotiate_branch_name(
+                            active, prompt_text, git_mgr, console, short_session
+                        )
+                        consensus = next(iter(per_model.values()))
+                        new_slugs = {
+                            nm: per_model.get(nm, consensus)
+                            for nm in all_models_needing_slug
+                        }
+                    for nm, slug in new_slugs.items():
+                        _model_slugs[nm] = slug
+                        b = branch_name(nm, slug)
+                        if b not in session.branches:
+                            session.branches.append(b)
+                            if _remote_url:
+                                record_branch(b, _remote_url, session_name)
 
-            for m in target_models.values():
-                if m.tool_executor is not None:
-                    m.tool_executor.set_branch_slug(_session_branch_slug)
+            for nm, m in target_models.items():
+                if m.tool_executor is not None and nm in _model_slugs:
+                    m.tool_executor.set_branch_slug(_model_slugs[nm])
 
             busy_in_target = {nm for nm in target_models if nm in _busy_models}
             if busy_in_target:
@@ -1191,7 +1316,10 @@ async def run_repl(
                         console.print(f"  [green]✓[/green] [bold]{_nm}[/bold]: done")
 
                 _had_user_input = True
-                _background_tasks.add(asyncio.create_task(_background_run()))
+                _bt = asyncio.create_task(_background_run())
+                _background_tasks.add(_bt)
+                _model_tasks[nm] = _bt
+                _bt.add_done_callback(lambda t, _n=nm: _model_tasks.pop(_n, None))
     finally:
         _stdout_ctx.__exit__(None, None, None)
 
@@ -1214,10 +1342,11 @@ async def run_repl(
                     session.histories[name] = list(model.messages)
                 session.save()
 
-                if git_mgr is not None and session.branches and _session_branch_slug:
+                if git_mgr is not None and session.branches and _model_slugs:
                     allowed = set(session.branches)
+                    known_slugs = set(_model_slugs.values())
                     for b in git_mgr.list_agenttester_branches():
-                        if b not in allowed and _session_branch_slug in b:
+                        if b not in allowed and any(s in b for s in known_slugs):
                             with contextlib.suppress(Exception):
                                 git_mgr.delete_local_branch(b)
 
