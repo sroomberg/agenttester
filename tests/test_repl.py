@@ -627,6 +627,44 @@ class TestRunReplSession:
 
         assert (sessions_dir / "my-session.json").exists()
 
+    async def test_resumed_session_no_input_not_marked_empty(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = _make_config(
+            tmp_path,
+            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
+        )
+        sessions_dir = tmp_path / "sessions"
+        saved = ReplSession.create("resume-noinput")
+        saved.histories["m"] = [{"role": "user", "content": "prior"}]
+        saved.save(sessions_dir)
+
+        inputs = iter(["exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        output_lines: list[str] = []
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_session_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=sessions_dir,
+            ),
+            patch("agenttester.repl.Console") as mock_console_cls,
+        ):
+            mock_session_cls.return_value.prompt_async = fake_prompt
+            mock_console_cls.return_value.print = lambda *a, **_kw: output_lines.append(
+                str(a[0]) if a else ""
+            )
+            await run_repl(cfg, session_name="resume-noinput")
+
+        assert not any("empty" in line.lower() for line in output_lines)
+        assert any("resume-noinput" in line for line in output_lines)
+
     async def test_session_history_restored_on_resume(self, tmp_path: Path) -> None:
         cfg = _make_config(
             tmp_path,

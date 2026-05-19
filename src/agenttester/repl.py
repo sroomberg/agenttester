@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import re
 import subprocess
-import tempfile
 import time
 import uuid
 from collections.abc import Callable
@@ -631,8 +630,11 @@ async def _load_and_check_models(
 def _init_session(
     session_name: str | None,
     console: Console,
-) -> tuple[ReplSession, str]:
-    """Load or create a session and print a status line. Returns (session, name)."""
+) -> tuple[ReplSession, str, bool]:
+    """Load or create a session and print a status line.
+
+    Returns ``(session, name, is_new)`` — *is_new* is False for resumed sessions.
+    """
     if not session_name:
         session_name = str(uuid.uuid4())
     session, is_new = ReplSession.load_or_create(session_name)
@@ -644,7 +646,7 @@ def _init_session(
             f"[dim]Session: {session_name}"
             f"  ({n} message(s) across {len(session.histories)} model(s))[/dim]"
         )
-    return session, session_name
+    return session, session_name, is_new
 
 
 def _setup_git_and_tools(
@@ -682,7 +684,7 @@ def _setup_git_and_tools(
                     notify_url=notify_url,
                     question_registry=question_registry,
                 )
-            clones_dir = Path(tempfile.gettempdir()) / "agenttester" / session_name
+            clones_dir = git_mgr.worktree_base / session_name
             console.print(f"[dim]Each model working in {clones_dir}[/dim]")
             return git_mgr
         else:
@@ -801,7 +803,7 @@ async def run_repl(
     if not models:
         return
 
-    session, session_name = _init_session(session_name, console)
+    session, session_name, _is_new_session = _init_session(session_name, console)
     question_registry = QuestionRegistry()
     git_mgr = _setup_git_and_tools(
         workdir,
@@ -1077,21 +1079,22 @@ async def run_repl(
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await asyncio.shield(task)
 
-        if not _had_user_input:
+        if not _had_user_input and _is_new_session:
             console.print("\n[dim]Session was empty — not saved.[/dim]")
         else:
-            for name, model in models.items():
-                session.histories[name] = list(model.messages)
-            session.save()
+            if _had_user_input:
+                for name, model in models.items():
+                    session.histories[name] = list(model.messages)
+                session.save()
 
-            if git_mgr is not None and session.branches and _session_branch_slug:
-                allowed = set(session.branches)
-                for b in git_mgr.list_agenttester_branches():
-                    if b not in allowed and _session_branch_slug in b:
-                        with contextlib.suppress(Exception):
-                            git_mgr.delete_local_branch(b)
+                if git_mgr is not None and session.branches and _session_branch_slug:
+                    allowed = set(session.branches)
+                    for b in git_mgr.list_agenttester_branches():
+                        if b not in allowed and _session_branch_slug in b:
+                            with contextlib.suppress(Exception):
+                                git_mgr.delete_local_branch(b)
 
             console.print(f"\n[dim]bye  —  agent-tester --resume {session_name}[/dim]")
 
         if git_mgr is not None:
-            GitManager.cleanup_model_clones(session_name)
+            git_mgr.cleanup_model_clones(session_name)

@@ -7,7 +7,6 @@ import os
 import re
 import shlex
 import shutil
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -106,12 +105,7 @@ class GitManager:
         When *branch* is provided and exists on the remote, the clone checks
         out that branch so prior work is immediately available.
         """
-        dest = (
-            Path(tempfile.gettempdir())
-            / "agenttester"
-            / session_id
-            / _sanitize_ref_component(model_name)
-        )
+        dest = self.worktree_base / session_id / _sanitize_ref_component(model_name)
         if dest.exists():
             if branch:
                 clone_repo = git.Repo(dest)
@@ -146,10 +140,9 @@ class GitManager:
 
         return dest
 
-    @staticmethod
-    def cleanup_model_clones(session_id: str) -> None:
-        """Remove all temp clone directories created for a session."""
-        session_dir = Path(tempfile.gettempdir()) / "agenttester" / session_id
+    def cleanup_model_clones(self, session_id: str) -> None:
+        """Remove all clone directories created for a session."""
+        session_dir = self.worktree_base / session_id
         if session_dir.exists():
             shutil.rmtree(session_dir, ignore_errors=True)
 

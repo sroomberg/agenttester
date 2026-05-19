@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.4 — 2026-05-19
+- Move agent working directories from `/tmp` to `.agenttester/worktrees/<session-id>/` so the user can inspect them; cleaned up aggressively on session exit
+- Fix "Session was empty — not saved." message appearing incorrectly on resumed sessions with no new prompts
+
 ## v1.1.3 — 2026-05-19
 - Update `testing.md` skill: check CI workflow files first for test/lint commands; note they are the source of truth for what must pass
 
