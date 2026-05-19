@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenttester"
-version = "1.1.0"
+version = "1.1.1"
 description = "Run a prompt against multiple coding agents in parallel and compare results"
 readme = "README.md"
 requires-python = ">=3.10"

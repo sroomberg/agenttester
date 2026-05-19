@@ -552,6 +552,40 @@ class TestLoadEvaluatorsAndEvalConfig:
         assert prov.aws_session_token_env == "MY_TOKEN"
         assert prov.aws_profile is None
 
+    def test_loads_github_provider(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  github:\n"
+            "    type: github\n"
+            "evaluators:\n"
+            "  - name: gpt-4o\n"
+            "    provider: github\n"
+            "    model: gpt-4o\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        prov = evaluators[0].provider
+        assert isinstance(prov, OpenAICompatProvider)
+        assert prov.endpoint == "https://models.inference.ai.azure.com"
+        assert prov.api_key_env == "GITHUB_TOKEN"
+
+    def test_github_provider_custom_api_key_env(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  github:\n"
+            "    type: github\n"
+            "    api_key_env: MY_GH_TOKEN\n"
+            "evaluators:\n"
+            "  - name: gpt-4o\n"
+            "    provider: github\n"
+            "    model: gpt-4o\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        prov = evaluators[0].provider
+        assert isinstance(prov, OpenAICompatProvider)
+        assert prov.api_key_env == "MY_GH_TOKEN"
+
 
 class TestGetReportsDir:
     def test_default_is_global_config_dir(self, tmp_path: Path) -> None:

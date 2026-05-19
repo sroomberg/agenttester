@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.1 — 2026-05-19
+- Add tests for `type: github` provider (default `GITHUB_TOKEN` and custom `api_key_env`)
+
 ## v1.1.0 — 2026-05-19
 - Add `type: github` provider: routes to GitHub Models (`https://models.inference.ai.azure.com`) with `GITHUB_TOKEN` auth (overridable via `api_key_env`)
 
