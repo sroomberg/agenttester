@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,8 +50,8 @@ class ReplSession:
 
     @classmethod
     def load(cls, name: str, sessions_dir: Path | None = None) -> ReplSession:
-        path = (sessions_dir or _default_sessions_dir()) / f"{name}.json"
-        data = json.loads(path.read_text())
+        path = (sessions_dir or _default_sessions_dir()) / f"{name}.yaml"
+        data = yaml.safe_load(path.read_text()) or {}
         return cls(
             id=data["id"],
             created_at=data["created_at"],
@@ -81,9 +80,9 @@ class ReplSession:
     ) -> None:
         d = sessions_dir or _default_sessions_dir()
         d.mkdir(parents=True, exist_ok=True)
-        path = d / f"{self.id}.json"
+        path = d / f"{self.id}.yaml"
         path.write_text(
-            json.dumps(
+            yaml.dump(
                 {
                     "id": self.id,
                     "created_at": self.created_at,
@@ -92,7 +91,8 @@ class ReplSession:
                     "reports": self.reports,
                     "eval_results": self.eval_results,
                 },
-                indent=2,
+                default_flow_style=False,
+                allow_unicode=True,
             )
         )
         limit = max_sessions if max_sessions is not None else _read_max_sessions()
@@ -109,7 +109,7 @@ class ReplSession:
             s.delete(sessions_dir)
 
     def delete(self, sessions_dir: Path | None = None) -> None:
-        path = (sessions_dir or _default_sessions_dir()) / f"{self.id}.json"
+        path = (sessions_dir or _default_sessions_dir()) / f"{self.id}.yaml"
         path.unlink(missing_ok=True)
 
     @classmethod
@@ -118,7 +118,7 @@ class ReplSession:
         if not d.exists():
             return []
         sessions = []
-        for p in sorted(d.glob("*.json")):
+        for p in sorted(d.glob("*.yaml")):
             with contextlib.suppress(Exception):
                 sessions.append(cls.load(p.stem, d))
         return sessions

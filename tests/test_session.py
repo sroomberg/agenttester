@@ -37,7 +37,7 @@ class TestSaveAndLoad:
         d = tmp_path / "deep" / "sessions"
         s = ReplSession.create("x")
         s.save(d)
-        assert (d / "x.json").exists()
+        assert (d / "x.yaml").exists()
 
     def test_load_missing_raises(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
@@ -72,7 +72,7 @@ class TestListAll:
 
     def test_skips_corrupt_files(self, tmp_path: Path) -> None:
         ReplSession.create("good").save(tmp_path)
-        (tmp_path / "bad.json").write_text("not valid json{{{")
+        (tmp_path / "bad.yaml").write_text("key: [unclosed")
         sessions = ReplSession.list_all(tmp_path)
         assert len(sessions) == 1
         assert sessions[0].id == "good"
@@ -82,9 +82,9 @@ class TestDelete:
     def test_deletes_file(self, tmp_path: Path) -> None:
         s = ReplSession.create("del-me")
         s.save(tmp_path)
-        assert (tmp_path / "del-me.json").exists()
+        assert (tmp_path / "del-me.yaml").exists()
         s.delete(tmp_path)
-        assert not (tmp_path / "del-me.json").exists()
+        assert not (tmp_path / "del-me.yaml").exists()
 
     def test_delete_missing_is_noop(self, tmp_path: Path) -> None:
         s = ReplSession.create("ghost")

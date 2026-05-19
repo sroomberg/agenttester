@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.8 — 2026-05-19
+- Convert session files from JSON to YAML (`sessions/<id>.yaml`) for readability
+
 ## v1.1.7 — 2026-05-19
 - Change branch manifest format from JSON to YAML (`branches.yaml`)
 

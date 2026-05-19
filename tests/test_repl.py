@@ -595,7 +595,7 @@ class TestRunReplSession:
             mock_session_cls.return_value.prompt_async = fake_prompt
             await run_repl(cfg, session_name="my-session")
 
-        assert not (sessions_dir / "my-session.json").exists()
+        assert not (sessions_dir / "my-session.yaml").exists()
 
     async def test_session_saved_when_prompts_sent(self, tmp_path: Path) -> None:
         cfg = _make_config(
@@ -625,7 +625,7 @@ class TestRunReplSession:
             mock_session_cls.return_value.prompt_async = fake_prompt
             await run_repl(cfg, session_name="my-session")
 
-        assert (sessions_dir / "my-session.json").exists()
+        assert (sessions_dir / "my-session.yaml").exists()
 
     async def test_resumed_session_no_input_not_marked_empty(
         self, tmp_path: Path
