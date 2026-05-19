@@ -127,7 +127,7 @@ class BedrockProvider(Provider):
         aws_secret_access_key_env: str | None = None,
         aws_session_token_env: str | None = None,
         auth_method: str = "default",
-        api_key_env: str | None = None,
+        api_key_env: str | None = "BEDROCK_API_KEY",
     ) -> None:
         self.region = region
         self.aws_profile = aws_profile

@@ -40,7 +40,7 @@ class AzureProvider(OpenAICompatProvider):
     def __init__(
         self,
         endpoint: str,
-        api_key_env: str | None = None,
+        api_key_env: str | None = "AZURE_OPENAI_API_KEY",
         auth_method: str = "api_key",
     ) -> None:
         super().__init__(endpoint, api_key_env)
