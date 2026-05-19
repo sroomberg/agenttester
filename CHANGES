@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.7 — 2026-05-18
+- Bottom toolbar shows `evaluating (N/M)` while `/evaluate` is running
+- `/status` prints a review-progress line during evaluation
+- `/evaluate` now prints each reviewer's result as it completes (parallel reviews, `asyncio.as_completed`) rather than waiting for all before printing
+
 ## v1.0.6 — 2026-05-18
 - On resume when clones are gone, `clone_for_model` clones the model's existing remote branch directly (`--branch --single-branch`) so agents land on their prior branch; if clone exists but is on the wrong branch, fetch and checkout the correct one
 

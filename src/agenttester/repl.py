@@ -475,10 +475,12 @@ async def _run_evaluate(
     models: dict[str, Model],
     console: Console,
     reports_store: dict[str, dict[str, str]],
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> None:
     """Cross-evaluation: each model reviews every other model's work.
 
     If *reports_store* is empty, report collection runs first.
+    Calls *on_progress(done, total)* after each review completes.
     """
     if not reports_store:
         console.print("[dim]No reports yet — generating reports first…[/dim]\n")
@@ -492,6 +494,12 @@ async def _run_evaluate(
 
     n_work = len(models_with_work)
     console.print(f"\n[bold]Cross-evaluation — {n_work} model(s) with work[/bold]\n")
+
+    n_reviewers = max(len(models) - 1, 0)
+    total = n_work * n_reviewers
+    done = 0
+    if on_progress:
+        on_progress(done, total)
 
     for reviewed_name, report in models_with_work.items():
         reviewers = [(n, m) for n, m in models.items() if n != reviewed_name]
@@ -535,13 +543,16 @@ async def _run_evaluate(
             except Exception as exc:
                 return reviewer_name, f"[error: {exc}]"
 
-        results = await asyncio.gather(*[_review(n, m) for n, m in reviewers])
-        for reviewer_name, text in results:
+        for coro in asyncio.as_completed([_review(n, m) for n, m in reviewers]):
+            reviewer_name, text = await coro
             console.print(
                 f"[bold]{reviewer_name}[/bold] reviews [bold]{reviewed_name}[/bold]:"
             )
             console.print(text)
             console.print()
+            done += 1
+            if on_progress:
+                on_progress(done, total)
 
 
 # ---------------------------------------------------------------------------
@@ -804,6 +815,8 @@ async def run_repl(
     _ctrl_c_clear_task: asyncio.Task | None = None
     _had_user_input = False
     _reports: dict[str, dict[str, str]] = {}
+    _eval_done = 0
+    _eval_total = 0
 
     def _toolbar() -> HTML:
         if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < _CTRL_C_TIMEOUT:
@@ -816,6 +829,10 @@ async def run_repl(
             parts.append(f"<ansigreen>{n_running} running</ansigreen>")
         if n_waiting:
             parts.append(f"<ansiyellow>{n_waiting} waiting</ansiyellow>")
+        if _eval_total > 0:
+            parts.append(
+                f"<ansicyan>evaluating ({_eval_done}/{_eval_total})</ansicyan>"
+            )
         if not parts:
             return HTML("<ansigreen>ready</ansigreen>")
         return HTML(" | ".join(parts))
@@ -877,6 +894,11 @@ async def run_repl(
                         console.print(f"  [green]● {name}[/green]  running")
                     else:
                         console.print(f"  [dim]○ {name}[/dim]  idle")
+                if _eval_total > 0:
+                    console.print(
+                        f"  [cyan]⟳ evaluating[/cyan]  "
+                        f"{_eval_done}/{_eval_total} reviews complete"
+                    )
                 console.print()
                 continue
 
@@ -889,9 +911,27 @@ async def run_repl(
 
             if raw == "/evaluate":
                 console.print("[dim]Starting cross-evaluation…[/dim]\n")
-                _background_tasks.add(
-                    asyncio.create_task(_run_evaluate(models, console, _reports))
-                )
+
+                def _on_eval_progress(done: int, total: int) -> None:
+                    nonlocal _eval_done, _eval_total
+                    _eval_done = done
+                    _eval_total = total
+                    with contextlib.suppress(Exception):
+                        _prompt_session.app.invalidate()
+
+                async def _eval_task() -> None:
+                    nonlocal _eval_done, _eval_total
+                    try:
+                        await _run_evaluate(
+                            models, console, _reports, on_progress=_on_eval_progress
+                        )
+                    finally:
+                        _eval_done = 0
+                        _eval_total = 0
+                        with contextlib.suppress(Exception):
+                            _prompt_session.app.invalidate()
+
+                _background_tasks.add(asyncio.create_task(_eval_task()))
                 continue
 
             if _handle_reply(raw, question_registry, console):
