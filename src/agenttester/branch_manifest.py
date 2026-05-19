@@ -2,29 +2,30 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
+
+import yaml
 
 from .config import GLOBAL_CONFIG_DIR
 
 
 def _manifest_path() -> Path:
-    return GLOBAL_CONFIG_DIR / "branches.json"
+    return GLOBAL_CONFIG_DIR / "branches.yaml"
 
 
 def _load(path: Path | None = None) -> dict:
     p = path or _manifest_path()
     try:
-        return json.loads(p.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
+        return yaml.safe_load(p.read_text()) or {}
+    except (FileNotFoundError, yaml.YAMLError):
         return {}
 
 
 def _save(data: dict, path: Path | None = None) -> None:
     p = path or _manifest_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2))
+    p.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True))
 
 
 def record_branch(

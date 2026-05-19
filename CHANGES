@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.7 — 2026-05-19
+- Change branch manifest format from JSON to YAML (`branches.yaml`)
+
 ## v1.1.6 — 2026-05-19
 - Add branch manifest (`~/.config/agenttester/branches.json`): records every branch with its remote URI and session ID when created; entries are removed when branches are deleted via cleanup
 
