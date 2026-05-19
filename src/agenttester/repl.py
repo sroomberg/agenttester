@@ -476,11 +476,14 @@ async def _run_evaluate(
     console: Console,
     reports_store: dict[str, dict[str, str]],
     on_progress: Callable[[int, int], None] | None = None,
+    eval_results: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Cross-evaluation: each model reviews every other model's work.
 
     If *reports_store* is empty, report collection runs first.
-    Calls *on_progress(done, total)* after each review completes.
+    Reviews already present in *eval_results* are printed immediately and
+    skipped; new results are written into *eval_results* as they arrive.
+    Calls *on_progress(done, total)* after each new review completes.
     """
     if not reports_store:
         console.print("[dim]No reports yet — generating reports first…[/dim]\n")
@@ -495,10 +498,13 @@ async def _run_evaluate(
     n_work = len(models_with_work)
     console.print(f"\n[bold]Cross-evaluation — {n_work} model(s) with work[/bold]\n")
 
-    n_reviewers = max(len(models) - 1, 0)
-    total = n_work * n_reviewers
+    cache = eval_results if eval_results is not None else {}
+    total = sum(
+        sum(1 for n in models if n != rn and n not in cache.get(rn, {}))
+        for rn in models_with_work
+    )
     done = 0
-    if on_progress:
+    if on_progress and total > 0:
         on_progress(done, total)
 
     for reviewed_name, report in models_with_work.items():
@@ -530,6 +536,19 @@ async def _run_evaluate(
             console.print(f"[dim]{first_line}[/dim]")
         console.print()
 
+        cached_reviews = cache.get(reviewed_name, {})
+        for reviewer_name, text in cached_reviews.items():
+            console.print(
+                f"[bold]{reviewer_name}[/bold] reviews [bold]{reviewed_name}[/bold]:"
+                f" [dim](resumed)[/dim]"
+            )
+            console.print(text)
+            console.print()
+
+        pending = [(n, m) for n, m in reviewers if n not in cached_reviews]
+        if not pending:
+            continue
+
         async def _review(
             reviewer_name: str, reviewer: Model, prompt: str = review_prompt
         ) -> tuple[str, str]:
@@ -543,13 +562,15 @@ async def _run_evaluate(
             except Exception as exc:
                 return reviewer_name, f"[error: {exc}]"
 
-        for coro in asyncio.as_completed([_review(n, m) for n, m in reviewers]):
+        for coro in asyncio.as_completed([_review(n, m) for n, m in pending]):
             reviewer_name, text = await coro
             console.print(
                 f"[bold]{reviewer_name}[/bold] reviews [bold]{reviewed_name}[/bold]:"
             )
             console.print(text)
             console.print()
+            if eval_results is not None:
+                eval_results.setdefault(reviewed_name, {})[reviewer_name] = text
             done += 1
             if on_progress:
                 on_progress(done, total)
@@ -814,7 +835,10 @@ async def run_repl(
     _ctrl_c_at: float | None = None
     _ctrl_c_clear_task: asyncio.Task | None = None
     _had_user_input = False
-    _reports: dict[str, dict[str, str]] = {}
+    _reports: dict[str, dict[str, str]] = dict(session.reports)
+    _eval_results: dict[str, dict[str, str]] = {
+        k: dict(v) for k, v in session.eval_results.items()
+    }
     _eval_done = 0
     _eval_total = 0
 
@@ -904,9 +928,13 @@ async def run_repl(
 
             if raw == "/report":
                 console.print("[dim]Collecting work reports…[/dim]\n")
-                _background_tasks.add(
-                    asyncio.create_task(_run_report(models, console, _reports))
-                )
+
+                async def _report_task() -> None:
+                    await _run_report(models, console, _reports)
+                    session.reports = dict(_reports)
+                    session.save()
+
+                _background_tasks.add(asyncio.create_task(_report_task()))
                 continue
 
             if raw == "/evaluate":
@@ -916,6 +944,11 @@ async def run_repl(
                     nonlocal _eval_done, _eval_total
                     _eval_done = done
                     _eval_total = total
+                    session.reports = dict(_reports)
+                    session.eval_results = {
+                        k: dict(v) for k, v in _eval_results.items()
+                    }
+                    session.save()
                     with contextlib.suppress(Exception):
                         _prompt_session.app.invalidate()
 
@@ -923,7 +956,11 @@ async def run_repl(
                     nonlocal _eval_done, _eval_total
                     try:
                         await _run_evaluate(
-                            models, console, _reports, on_progress=_on_eval_progress
+                            models,
+                            console,
+                            _reports,
+                            on_progress=_on_eval_progress,
+                            eval_results=_eval_results,
                         )
                     finally:
                         _eval_done = 0

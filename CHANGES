@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.9 — 2026-05-18
+- Persist `reports` and `eval_results` in the session file; on resume, `/report` data is reused and completed reviews are printed immediately (marked `(resumed)`) with only pending reviews re-running
+
 ## v1.0.8 — 2026-05-18
 - Fix `/report` on resumed sessions when clones are gone: `--single-branch` clone set `origin/HEAD` to the agent's own branch, making `origin/HEAD..HEAD` always empty; now clone with `--depth 1` (correct `origin/HEAD`) then fetch and checkout the agent's branch
 

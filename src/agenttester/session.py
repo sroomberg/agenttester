@@ -39,6 +39,8 @@ class ReplSession:
     created_at: str
     histories: dict[str, list[dict]] = field(default_factory=dict)
     branches: list[str] = field(default_factory=list)
+    reports: dict[str, dict[str, str]] = field(default_factory=dict)
+    eval_results: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @classmethod
     def create(cls, name: str) -> ReplSession:
@@ -56,6 +58,8 @@ class ReplSession:
             created_at=data["created_at"],
             histories=data.get("histories", {}),
             branches=data.get("branches", []),
+            reports=data.get("reports", {}),
+            eval_results=data.get("eval_results", {}),
         )
 
     @classmethod
@@ -85,6 +89,8 @@ class ReplSession:
                     "created_at": self.created_at,
                     "histories": self.histories,
                     "branches": self.branches,
+                    "reports": self.reports,
+                    "eval_results": self.eval_results,
                 },
                 indent=2,
             )
