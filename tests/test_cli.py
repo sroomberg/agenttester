@@ -175,9 +175,7 @@ class TestSessionsCommand:
 
         def _first_line(key: str) -> int:
             return next(
-                i
-                for i, ln in enumerate(lines)
-                if ln.lstrip("- ").startswith(f"{key}:")
+                i for i, ln in enumerate(lines) if ln.lstrip("- ").startswith(f"{key}:")
             )
 
         assert _first_line("id") < _first_line("date") < _first_line("start")

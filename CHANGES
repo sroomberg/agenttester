@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.0 — 2026-05-19
+- `/evaluate` now accepts an optional comma-separated reviewer list (e.g., `/evaluate claude,gpt4`) to limit which models act as reviewers
+- Evaluation documents are saved as Markdown files to `<repo>/.agenttester/evaluations/<session_slug>/` (filenames: `<reviewed>-by-<reviewer>.md`) and review prompts now request Markdown-formatted output
+- Add `/iterate <prompt>` command: shows a per-model plan of which peer evaluations will be included, requires `y`/`n` approval, then sends each model its own evaluations plus the iteration prompt
+- Update `editing.md` skill: clarify the search step is about building context before implementing; add "Completing Work" section requiring a concise summary of changes after each task
+
 ## v1.1.11 — 2026-05-19
 - Fix `sessions` YAML output: preserve key order (id, date, start, end, branches) via sort_keys=False; use plain print to avoid Rich markup interference
 

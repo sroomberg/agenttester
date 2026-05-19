@@ -57,6 +57,7 @@ _SLASH_COMMANDS = [
     ("/reply", "send a response to a waiting model"),
     ("/report", "show each model's work summary (commits + diff stats)"),
     ("/evaluate", "cross-evaluate: each model reviews the others' work"),
+    ("/iterate", "send iteration prompt incorporating peer evaluations"),
 ]
 
 
@@ -477,12 +478,16 @@ async def _run_evaluate(
     reports_store: dict[str, dict[str, str]],
     on_progress: Callable[[int, int], None] | None = None,
     eval_results: dict[str, dict[str, str]] | None = None,
+    reviewer_names: set[str] | None = None,
+    eval_dir: Path | None = None,
 ) -> None:
     """Cross-evaluation: each model reviews every other model's work.
 
     If *reports_store* is empty, report collection runs first.
+    If *reviewer_names* is given, only those models act as reviewers.
     Reviews already present in *eval_results* are printed immediately and
     skipped; new results are written into *eval_results* as they arrive.
+    If *eval_dir* is given, each review is saved as a Markdown file there.
     Calls *on_progress(done, total)* after each new review completes.
     """
     if not reports_store:
@@ -499,8 +504,9 @@ async def _run_evaluate(
     console.print(f"\n[bold]Cross-evaluation — {n_work} model(s) with work[/bold]\n")
 
     cache = eval_results if eval_results is not None else {}
+    eligible_reviewers = reviewer_names if reviewer_names is not None else set(models)
     total = sum(
-        sum(1 for n in models if n != rn and n not in cache.get(rn, {}))
+        sum(1 for n in eligible_reviewers if n != rn and n not in cache.get(rn, {}))
         for rn in models_with_work
     )
     done = 0
@@ -508,7 +514,11 @@ async def _run_evaluate(
         on_progress(done, total)
 
     for reviewed_name, report in models_with_work.items():
-        reviewers = [(n, m) for n, m in models.items() if n != reviewed_name]
+        reviewers = [
+            (n, m)
+            for n, m in models.items()
+            if n != reviewed_name and n in eligible_reviewers
+        ]
         if not reviewers:
             console.print("[yellow]Need at least 2 models for peer review.[/yellow]\n")
             return
@@ -517,17 +527,24 @@ async def _run_evaluate(
         if len(diff_text) > _MAX_DIFF_CHARS:
             diff_text = diff_text[:_MAX_DIFF_CHARS] + "\n... [truncated]"
 
-        review_prompt = f"Peer-review the work of AI agent '{reviewed_name}'.\n\n"
+        review_prompt = (
+            f"Peer-review the work of AI agent '{reviewed_name}'.\n\n"
+            "Respond in **Markdown** format.\n\n"
+        )
         if report["commits"]:
             review_prompt += f"Commits:\n```\n{report['commits']}\n```\n\n"
         if diff_text:
             review_prompt += f"Diff:\n```diff\n{diff_text}\n```\n\n"
         review_prompt += (
-            "Evaluate concisely (under 300 words):\n"
-            "1. **Correctness** — does the implementation look correct?\n"
-            "2. **Code quality** — clean, idiomatic, well-structured?\n"
-            "3. **Completeness** — does it fully address the task?\n"
-            "4. **Issues** — any bugs, edge cases, or concerns?"
+            "Evaluate concisely (under 300 words) using these headings:\n\n"
+            "## Correctness\n"
+            "Does the implementation look correct?\n\n"
+            "## Code Quality\n"
+            "Is it clean, idiomatic, and well-structured?\n\n"
+            "## Completeness\n"
+            "Does it fully address the task?\n\n"
+            "## Issues\n"
+            "List any bugs, edge cases, or concerns."
         )
 
         console.print(f"[bold cyan]── {reviewed_name}'s work ──[/bold cyan]")
@@ -571,6 +588,13 @@ async def _run_evaluate(
             console.print()
             if eval_results is not None:
                 eval_results.setdefault(reviewed_name, {})[reviewer_name] = text
+            if eval_dir is not None:
+                safe_reviewed = _sanitize_ref_component(reviewed_name)
+                safe_reviewer = _sanitize_ref_component(reviewer_name)
+                fname = f"{safe_reviewed}-by-{safe_reviewer}.md"
+                header = f"# Evaluation of {reviewed_name} by {reviewer_name}\n\n"
+                eval_dir.mkdir(parents=True, exist_ok=True)
+                (eval_dir / fname).write_text(header + text, encoding="utf-8")
             done += 1
             if on_progress:
                 on_progress(done, total)
@@ -844,6 +868,7 @@ async def run_repl(
     }
     _eval_done = 0
     _eval_total = 0
+    _pending_iterate: str | None = None
 
     def _toolbar() -> HTML:
         if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < _CTRL_C_TIMEOUT:
@@ -905,6 +930,84 @@ async def run_repl(
                     break
                 continue
 
+            if _pending_iterate is not None:
+                if raw.lower() == "y":
+                    _iter_prompt = _pending_iterate
+                    _pending_iterate = None
+                    busy_iter = set(models) & _busy_models
+                    target_iter = {
+                        nm: m for nm, m in models.items() if nm not in busy_iter
+                    }
+                    if busy_iter:
+                        console.print(
+                            f"[yellow]Skipping busy model(s): "
+                            f"{', '.join(busy_iter)}[/yellow]"
+                        )
+                    if target_iter:
+                        for nm, m in target_iter.items():
+                            peer_evals = _eval_results.get(nm, {})
+                            if peer_evals:
+                                eval_section = "\n\n".join(
+                                    f"**{reviewer} on your work:**\n\n{text}"
+                                    for reviewer, text in peer_evals.items()
+                                )
+                                full_prompt = (
+                                    "The following are peer evaluations of your work:"
+                                    f"\n\n{eval_section}"
+                                    f"\n\nBased on this feedback, please iterate:"
+                                    f"\n\n{_iter_prompt}"
+                                )
+                            else:
+                                full_prompt = _iter_prompt
+
+                            async def _iterate_run(
+                                _nm: str = nm,
+                                _m: Model = m,
+                                _p: str = full_prompt,
+                            ) -> None:
+                                _busy_models.add(_nm)
+                                try:
+                                    _, reply = await _run_one(
+                                        _nm,
+                                        _m,
+                                        _p,
+                                        _make_event_handler(_m.event_logger),
+                                        question_registry,
+                                    )
+                                except asyncio.CancelledError:
+                                    if _m.event_logger is not None:
+                                        _m.event_logger.log("status", "stopped")
+                                    return
+                                finally:
+                                    _busy_models.discard(_nm)
+                                if _m.event_logger is not None:
+                                    _m.event_logger.log("response", reply)
+                                    _m.event_logger.log(
+                                        "status", "waiting for next instructions"
+                                    )
+                                if reply.startswith("[error]"):
+                                    console.print(
+                                        f"  [red]✗ {_nm}[/red]: {reply[:100]}"
+                                    )
+                                else:
+                                    console.print(
+                                        f"  [green]✓[/green] [bold]{_nm}[/bold]: done"
+                                    )
+
+                            _had_user_input = True
+                            _background_tasks.add(asyncio.create_task(_iterate_run()))
+                    continue
+                elif raw.lower() == "n":
+                    console.print("[dim]Iteration cancelled.[/dim]\n")
+                    _pending_iterate = None
+                    continue
+                else:
+                    console.print(
+                        "[yellow]Pending /iterate — type 'y' to confirm or "
+                        "'n' to cancel.[/yellow]\n"
+                    )
+                    continue
+
             if raw == "/reset":
                 for model in models.values():
                     model.messages = list(seed)
@@ -940,7 +1043,29 @@ async def run_repl(
                 _background_tasks.add(asyncio.create_task(_report_task()))
                 continue
 
-            if raw == "/evaluate":
+            if raw == "/evaluate" or raw.startswith("/evaluate "):
+                _eval_reviewer_names: set[str] | None = None
+                if raw.startswith("/evaluate "):
+                    _raw_reviewers = raw[len("/evaluate ") :].strip()
+                    if _raw_reviewers:
+                        _eval_reviewer_names = {
+                            n.strip() for n in _raw_reviewers.split(",") if n.strip()
+                        }
+                        _unknown = _eval_reviewer_names - set(models)
+                        if _unknown:
+                            console.print(
+                                f"[yellow]Unknown reviewer(s): "
+                                f"{', '.join(sorted(_unknown))}[/yellow]\n"
+                            )
+                            continue
+
+                _eval_dir: Path | None = None
+                if git_mgr is not None:
+                    _eval_slug = _session_branch_slug or session_name[:8]
+                    _eval_dir = (
+                        git_mgr.repo_path / ".agenttester" / "evaluations" / _eval_slug
+                    )
+
                 console.print("[dim]Starting cross-evaluation…[/dim]\n")
 
                 def _on_eval_progress(done: int, total: int) -> None:
@@ -955,7 +1080,10 @@ async def run_repl(
                     with contextlib.suppress(Exception):
                         _prompt_session.app.invalidate()
 
-                async def _eval_task() -> None:
+                async def _eval_task(
+                    _reviewer_names: set[str] | None = _eval_reviewer_names,
+                    _eval_dir_: Path | None = _eval_dir,
+                ) -> None:
                     nonlocal _eval_done, _eval_total
                     try:
                         await _run_evaluate(
@@ -964,6 +1092,8 @@ async def run_repl(
                             _reports,
                             on_progress=_on_eval_progress,
                             eval_results=_eval_results,
+                            reviewer_names=_reviewer_names,
+                            eval_dir=_eval_dir_,
                         )
                     finally:
                         _eval_done = 0
@@ -972,6 +1102,39 @@ async def run_repl(
                             _prompt_session.app.invalidate()
 
                 _background_tasks.add(asyncio.create_task(_eval_task()))
+                continue
+
+            if raw == "/iterate" or raw.startswith("/iterate "):
+                iter_prompt = (
+                    raw[len("/iterate ") :].strip()
+                    if raw.startswith("/iterate ")
+                    else ""
+                )
+                if not iter_prompt:
+                    console.print("[yellow]Usage: /iterate <prompt>[/yellow]\n")
+                    continue
+                if not _eval_results:
+                    console.print(
+                        "[yellow]No evaluations yet — run /evaluate first.[/yellow]\n"
+                    )
+                    continue
+                console.print("[bold]Iteration plan:[/bold]")
+                for nm in models:
+                    peer_evals = _eval_results.get(nm, {})
+                    if peer_evals:
+                        reviewers_list = ", ".join(peer_evals)
+                        console.print(
+                            f"  [cyan]{nm}[/cyan] — evaluations from {reviewers_list}"
+                        )
+                    else:
+                        console.print(
+                            f"  [cyan]{nm}[/cyan] — no evaluations (prompt only)"
+                        )
+                console.print(f"\n  Prompt: [dim]{iter_prompt}[/dim]\n")
+                console.print(
+                    "Type [bold]y[/bold] to send or [bold]n[/bold] to cancel.\n"
+                )
+                _pending_iterate = iter_prompt
                 continue
 
             if _handle_reply(raw, question_registry, console):

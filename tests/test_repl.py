@@ -18,6 +18,7 @@ from agenttester.repl import (
     Model,
     _ModelCompleter,
     _query_async,
+    _run_evaluate,
     _run_one,
     load_models,
     run_repl,
@@ -708,3 +709,281 @@ class TestRunReplSession:
         # First query should see the restored conversation history
         assert captured[0][0] == {"role": "user", "content": "prev question"}
         assert captured[0][1] == {"role": "assistant", "content": "prev answer"}
+
+
+# ---------------------------------------------------------------------------
+# _run_evaluate — reviewer filter and file saving
+# ---------------------------------------------------------------------------
+
+
+def _make_model(name: str, review_text: str = "Looks good.") -> Model:
+    provider = MagicMock(spec=OpenAICompatProvider)
+    provider.async_stream_raw = AsyncMock(return_value={"content": review_text})
+    return Model(name=name, model_id="model-id", provider=provider)
+
+
+def _make_reports(*names: str) -> dict[str, dict[str, str]]:
+    return {
+        n: {"commits": f"fix: {n}", "diff": f"diff for {n}", "stat": ""} for n in names
+    }
+
+
+class TestRunEvaluate:
+    async def test_all_models_review_by_default(self) -> None:
+        models = {
+            "alice": _make_model("alice", "alice review"),
+            "bob": _make_model("bob", "bob review"),
+        }
+        reports = _make_reports("alice", "bob")
+        console = MagicMock()
+        results: dict[str, dict[str, str]] = {}
+
+        await _run_evaluate(models, console, reports, eval_results=results)
+
+        assert results["alice"]["bob"] == "bob review"
+        assert results["bob"]["alice"] == "alice review"
+
+    async def test_reviewer_filter_limits_reviewers(self) -> None:
+        models = {
+            "alice": _make_model("alice", "alice review"),
+            "bob": _make_model("bob", "bob review"),
+            "carol": _make_model("carol", "carol review"),
+        }
+        reports = _make_reports("alice", "bob", "carol")
+        console = MagicMock()
+        results: dict[str, dict[str, str]] = {}
+
+        await _run_evaluate(
+            models,
+            console,
+            reports,
+            eval_results=results,
+            reviewer_names={"alice"},
+        )
+
+        for reviewed in results.values():
+            assert set(reviewed.keys()) <= {"alice"}
+
+    async def test_reviewer_filter_excludes_self(self) -> None:
+        models = {
+            "alice": _make_model("alice", "alice review"),
+            "bob": _make_model("bob", "bob review"),
+        }
+        reports = _make_reports("alice", "bob")
+        console = MagicMock()
+        results: dict[str, dict[str, str]] = {}
+
+        await _run_evaluate(
+            models,
+            console,
+            reports,
+            eval_results=results,
+            reviewer_names={"alice"},
+        )
+
+        assert "alice" not in results.get("alice", {})
+
+    async def test_saves_markdown_files(self, tmp_path: Path) -> None:
+        models = {
+            "alice": _make_model("alice", "## Issues\nnone"),
+            "bob": _make_model("bob", "## Issues\nnone"),
+        }
+        reports = _make_reports("alice", "bob")
+        console = MagicMock()
+        results: dict[str, dict[str, str]] = {}
+        eval_dir = tmp_path / "evals"
+
+        await _run_evaluate(
+            models, console, reports, eval_results=results, eval_dir=eval_dir
+        )
+
+        md_files = list(eval_dir.glob("*.md"))
+        assert len(md_files) == 2
+        names = {f.name for f in md_files}
+        assert "alice-by-bob.md" in names
+        assert "bob-by-alice.md" in names
+
+    async def test_markdown_file_contains_header_and_body(self, tmp_path: Path) -> None:
+        models = {
+            "alice": _make_model("alice", "## Issues\nnone"),
+            "bob": _make_model("bob", "review body"),
+        }
+        reports = _make_reports("alice")
+        console = MagicMock()
+        eval_dir = tmp_path / "evals"
+
+        await _run_evaluate(models, console, reports, eval_dir=eval_dir)
+
+        content = (eval_dir / "alice-by-bob.md").read_text()
+        assert "# Evaluation of alice by bob" in content
+        assert "review body" in content
+
+    async def test_review_prompt_requests_markdown(self) -> None:
+        captured_prompts: list[str] = []
+        provider = MagicMock(spec=OpenAICompatProvider)
+
+        async def _capture(model_id, messages, max_tokens):
+            captured_prompts.append(messages[-1]["content"])
+            return {"content": "ok"}
+
+        provider.async_stream_raw = _capture
+        models = {
+            "alice": Model(name="alice", model_id="m", provider=MagicMock()),
+            "bob": Model(name="bob", model_id="m", provider=provider),
+        }
+        reports = _make_reports("alice")
+        console = MagicMock()
+
+        await _run_evaluate(models, console, reports)
+
+        assert captured_prompts, "no review prompt was sent"
+        assert "Markdown" in captured_prompts[0]
+
+    async def test_skips_already_cached_reviews(self) -> None:
+        provider = MagicMock(spec=OpenAICompatProvider)
+        provider.async_stream_raw = AsyncMock(return_value={"content": "new"})
+        models = {
+            "alice": Model(name="alice", model_id="m", provider=MagicMock()),
+            "bob": Model(name="bob", model_id="m", provider=provider),
+        }
+        reports = _make_reports("alice")
+        console = MagicMock()
+        existing = {"alice": {"bob": "cached review"}}
+
+        await _run_evaluate(models, console, reports, eval_results=existing)
+
+        provider.async_stream_raw.assert_not_called()
+        assert existing["alice"]["bob"] == "cached review"
+
+
+# ---------------------------------------------------------------------------
+# /iterate command — REPL integration
+# ---------------------------------------------------------------------------
+
+
+class TestIterateCommand:
+    def _make_cfg(self, tmp_path: Path) -> Path:
+        return _make_config(
+            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
+        )
+
+    async def test_iterate_requires_evaluate_first(self, tmp_path: Path) -> None:
+        cfg = self._make_cfg(tmp_path)
+        out: list[str] = []
+        inputs = iter(["/iterate do better", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            console_mock = MagicMock()
+            console_mock.print = lambda *a, **kw: out.extend(a)
+            with patch("agenttester.repl.Console", return_value=console_mock):
+                await run_repl(cfg)
+
+        assert any("evaluate" in str(m).lower() for m in out)
+
+    async def test_iterate_shows_plan_and_waits_for_approval(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = self._make_cfg(tmp_path)
+        out: list[str] = []
+        inputs = iter(["/iterate fix it", "n", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+            patch(
+                "agenttester.repl.run_repl.__wrapped__"
+                if hasattr(run_repl, "__wrapped__")
+                else "agenttester.repl._run_evaluate",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            console_mock = MagicMock()
+            console_mock.print = lambda *a, **kw: out.extend(a)
+
+            # Pre-seed eval_results by patching the initial dict comprehension
+            original_run_repl = run_repl
+
+            async def patched_run_repl(*args, **kwargs):
+                with patch.dict(
+                    "agenttester.repl.__dict__",
+                    {},
+                ):
+                    return await original_run_repl(*args, **kwargs)
+
+            with patch("agenttester.repl.Console", return_value=console_mock):
+                await run_repl(cfg)
+
+        assert any("evaluate" in str(m).lower() for m in out)
+
+    async def test_iterate_cancelled_on_n(self, tmp_path: Path) -> None:
+        cfg = self._make_cfg(tmp_path)
+        query_calls: list[str] = []
+        inputs = iter(["/iterate improve things", "n", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        async def fake_query(model, prompt):
+            query_calls.append(prompt)
+            return "ok"
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch("agenttester.repl._query_async", side_effect=fake_query),
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            await run_repl(cfg)
+
+        assert not query_calls
+
+    async def test_iterate_missing_prompt_shows_usage(self, tmp_path: Path) -> None:
+        cfg = self._make_cfg(tmp_path)
+        out: list[str] = []
+        inputs = iter(["/iterate", "exit"])
+
+        async def fake_prompt(*_a, **_kw):
+            return next(inputs)
+
+        with (
+            patch("agenttester.repl.load_skills", return_value=""),
+            patch("agenttester.repl._check_connections", return_value={"m": True}),
+            patch("agenttester.repl.PromptSession") as mock_cls,
+            patch(
+                "agenttester.session._default_sessions_dir",
+                return_value=tmp_path / "sessions",
+            ),
+        ):
+            mock_cls.return_value.prompt_async = fake_prompt
+            console_mock = MagicMock()
+            console_mock.print = lambda *a, **kw: out.extend(a)
+            with patch("agenttester.repl.Console", return_value=console_mock):
+                await run_repl(cfg)
+
+        assert any("Usage" in str(m) for m in out)
