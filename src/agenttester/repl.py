@@ -623,6 +623,7 @@ def _setup_git_and_tools(
     notify_url: str | None,
     question_registry: QuestionRegistry,
     console: Console,
+    session_branches: list[str] | None = None,
 ) -> GitManager | None:
     """Clone the repo per-model (when possible) and attach tool executors.
 
@@ -633,8 +634,16 @@ def _setup_git_and_tools(
         git_mgr = GitManager(workdir_path)
         if git_mgr.has_commits():
             console.print(f"\n[dim]Cloning {workdir_path} for each model…[/dim]")
+            _branch_lookup: dict[str, str] = {}
+            for br in session_branches or []:
+                parts = br.split("/", 2)
+                if len(parts) == 3:
+                    _branch_lookup[parts[1]] = br
             for model in models.values():
-                clone_path = git_mgr.clone_for_model(model.name, session_name)
+                model_branch = _branch_lookup.get(_sanitize_ref_component(model.name))
+                clone_path = git_mgr.clone_for_model(
+                    model.name, session_name, branch=model_branch
+                )
                 model.setup_executor(
                     workdir=str(clone_path),
                     pem_path=pem_path,
@@ -763,7 +772,14 @@ async def run_repl(
     session, session_name = _init_session(session_name, console)
     question_registry = QuestionRegistry()
     git_mgr = _setup_git_and_tools(
-        workdir, models, session_name, pem_path, notify_url, question_registry, console
+        workdir,
+        models,
+        session_name,
+        pem_path,
+        notify_url,
+        question_registry,
+        console,
+        session_branches=session.branches,
     )
 
     skill_text = load_skills(Path.cwd(), extra_paths=extra_skills)

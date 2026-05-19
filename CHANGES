@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.6 — 2026-05-18
+- On resume when clones are gone, `clone_for_model` clones the model's existing remote branch directly (`--branch --single-branch`) so agents land on their prior branch; if clone exists but is on the wrong branch, fetch and checkout the correct one
+
 ## v1.0.5 — 2026-05-18
 - Fix session resume: reuse existing model clones instead of wiping and re-cloning
 - Fix `/report` always returning empty: compare against `origin/HEAD` (remote default branch) instead of `FETCH_HEAD`, which was being set to the agent's own pushed branch after `git fetch origin`

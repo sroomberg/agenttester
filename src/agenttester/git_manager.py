@@ -94,12 +94,17 @@ class GitManager:
         """Return all local branch names under the agenttester/ prefix."""
         return [h.name for h in self.repo.heads if h.name.startswith("agenttester/")]
 
-    def clone_for_model(self, model_name: str, session_id: str) -> Path:
+    def clone_for_model(
+        self, model_name: str, session_id: str, branch: str | None = None
+    ) -> Path:
         """Return the clone directory for one model, creating it if needed.
 
         Each model gets its own isolated working directory so concurrent agents
         never read or write each other's files. On session resume the existing
         clone is reused so agents keep their branch and commit history.
+
+        When *branch* is provided and exists on the remote, the clone checks
+        out that branch so prior work is immediately available.
         """
         dest = (
             Path(tempfile.gettempdir())
@@ -108,6 +113,14 @@ class GitManager:
             / _sanitize_ref_component(model_name)
         )
         if dest.exists():
+            if branch:
+                clone_repo = git.Repo(dest)
+                try:
+                    if clone_repo.active_branch.name != branch:
+                        clone_repo.git.fetch("origin", branch)
+                        clone_repo.git.checkout(branch)
+                except Exception:
+                    pass
             return dest
         dest.parent.mkdir(parents=True, exist_ok=True)
 
@@ -117,6 +130,20 @@ class GitManager:
             clone_url = self.repo.remote(_DEFAULT_REMOTE).url
         except Exception:
             clone_url = self.repo_path.as_uri()
+
+        if branch:
+            try:
+                self.repo.git.clone(
+                    "--branch",
+                    branch,
+                    "--single-branch",
+                    clone_url,
+                    str(dest),
+                )
+                return dest
+            except GitCommandError:
+                if dest.exists():
+                    shutil.rmtree(dest, ignore_errors=True)
 
         self.repo.git.clone("--depth", "1", clone_url, str(dest))
         return dest
