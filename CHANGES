@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.4 — 2026-05-18
+- Consolidate config dir: `LocalCostBackend` and `_get_global_skills_dir` now use `GLOBAL_CONFIG_DIR` instead of `~/.agenttester`; `cli.py` `watch` command uses `GLOBAL_CONFIG_DIR / "sessions"` instead of a hardcoded path
+- Fix `_skills_from_configs`: resolve config file within `repo_path` using `CONFIG_CANDIDATES` instead of passing the directory to `get_config_paths`
+- Add `async_stream_raw` as an abstract method to `Provider` base class
+- Use `branch_name()` in `report.py` instead of hardcoded branch format string
+
 ## v1.0.3 — 2026-05-18
 - Expand `editing.md` skill: add single-source-of-truth section and things-to-avoid list (magic values, deep nesting, dead code, inappropriate intimacy, speculative generality, god objects)
 

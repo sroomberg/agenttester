@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
+from ..config import GLOBAL_CONFIG_DIR
 from .base import CostBackend, CostEntry
 
 
 class LocalCostBackend(CostBackend):
-    """Store costs in a local JSON lines file in ~/.agenttester."""
+    """Store costs in a local JSON lines file under the global config dir."""
 
     def __init__(self) -> None:
-        self.storage_dir = Path.home() / ".agenttester"
+        self.storage_dir = GLOBAL_CONFIG_DIR
         self.storage_dir.mkdir(exist_ok=True)
         self.cost_file = self.storage_dir / "costs.jsonl"
 

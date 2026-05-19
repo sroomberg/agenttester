@@ -14,7 +14,12 @@ from rich.console import Console
 from rich.table import Table
 
 from .cleanup import run_cleanup
-from .config import get_reports_dir, load_config, load_evaluators_and_eval_config
+from .config import (
+    GLOBAL_CONFIG_DIR,
+    get_reports_dir,
+    load_config,
+    load_evaluators_and_eval_config,
+)
 from .cost import CostTracker
 from .orchestrator import Orchestrator
 from .repl import run_repl
@@ -308,7 +313,7 @@ def watch(
     ] = None,
 ) -> None:
     """Follow a model's live activity from a separate terminal window."""
-    sessions_dir = Path.home() / ".config" / "agenttester" / "sessions"
+    sessions_dir = GLOBAL_CONFIG_DIR / "sessions"
 
     if not session:
         # Find the most recently active session (by event dir mtime)

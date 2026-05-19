@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 import aiohttp
 
@@ -19,3 +20,13 @@ class Provider(ABC):
     async def async_call(
         self, model: str, messages: list[dict], max_tokens: int
     ) -> str: ...
+
+    @abstractmethod
+    async def async_stream_raw(
+        self,
+        model: str,
+        messages: list[dict],
+        max_tokens: int,
+        tools: list[dict] | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> dict: ...

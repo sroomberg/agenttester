@@ -6,18 +6,15 @@ from pathlib import Path
 
 import yaml
 
-from .config import GLOBAL_CONFIG_DIR, get_config_paths
+from .config import CONFIG_CANDIDATES, GLOBAL_CONFIG_DIR, get_config_paths
 
 _BUILTIN_SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 def _get_global_skills_dir() -> Path | None:
-    """Return the first existing global skills directory."""
-    candidates = [
-        GLOBAL_CONFIG_DIR / "skills",
-        Path.home() / ".agenttester" / "skills",
-    ]
-    return next((p for p in candidates if p.is_dir()), None)
+    """Return the global skills directory if it exists."""
+    p = GLOBAL_CONFIG_DIR / "skills"
+    return p if p.is_dir() else None
 
 
 def _load_dir(directory: Path) -> dict[str, str]:
@@ -44,8 +41,15 @@ def _load_extra(paths: list[Path]) -> list[str]:
 def _skills_from_configs(repo_path: Path | None) -> list[Path]:
     """Read the ``skills:`` key from all config files and return resolved paths."""
     try:
+        local_config: Path | None = None
+        if repo_path is not None:
+            for name in CONFIG_CANDIDATES:
+                candidate = repo_path / name
+                if candidate.exists():
+                    local_config = candidate
+                    break
         result: list[Path] = []
-        for cfg_path in get_config_paths(repo_path):
+        for cfg_path in get_config_paths(local_config):
             with open(cfg_path) as f:
                 data = yaml.safe_load(f) or {}
             for entry in data.get("skills") or []:

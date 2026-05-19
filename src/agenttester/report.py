@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from .agent_runner import AgentResult
 from .evaluator import EvaluatorResult
-from .git_manager import GitManager
+from .git_manager import GitManager, branch_name
 
 
 def generate_report(
@@ -61,7 +61,7 @@ def generate_report(
             [
                 f"## {r.agent_name}",
                 "",
-                f"**Branch**: `agenttester/{r.agent_name}/{run_name}`",
+                f"**Branch**: `{branch_name(r.agent_name, run_name)}`",
                 f"**Duration**: {r.duration:.1f}s",
                 f"**Exit code**: {r.exit_code}",
             ]
