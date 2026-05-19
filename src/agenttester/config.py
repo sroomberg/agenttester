@@ -206,7 +206,7 @@ def _build_named_provider(name: str, data: dict) -> Provider:
             )
         return OpenAICompatProvider(
             endpoint=endpoint,
-            api_key_env=data.get("api_key_env"),
+            api_key_env=data.get("api_key_env", "OPENAI_API_KEY"),
         )
     if ptype == "bedrock":
         return BedrockProvider(

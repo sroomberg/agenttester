@@ -162,6 +162,16 @@ Define a `providers` block to share credentials across multiple evaluators or RE
 | `azure` | Azure AI Foundry / Azure OpenAI Service | built-in |
 | `vertex` | GCP Vertex AI (OpenAI-compatible endpoint) | built-in |
 
+Each provider type reads credentials from a standard environment variable automatically — no `api_key_env` required unless you want to override the default. Override by adding `api_key_env: MY_CUSTOM_VAR` to any provider or evaluator entry.
+
+| `type` | Default env var |
+|--------|----------------|
+| `openai` | `OPENAI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `azure` | `AZURE_OPENAI_API_KEY` |
+| `vertex` | `GOOGLE_API_KEY` |
+| `bedrock` (api_key mode) | `BEDROCK_API_KEY` |
+
 **OpenAI-compatible providers** (generic)
 
 ```yaml
@@ -169,32 +179,30 @@ providers:
   my-openai:
     type: openai
     endpoint: http://localhost:8004
-    api_key_env: MY_KEY
+    # reads OPENAI_API_KEY automatically; set api_key_env to override
 
 evaluators:
   - name: llama3
     provider: my-openai
     model: meta-llama/Meta-Llama-3-70B-Instruct
-    api_key_env: CUSTOM_KEY   # model-level override
 ```
 
 **AWS Bedrock**
 
 Four auth modes via `auth_method`:
 
-- `auth_method: api_key` — reads `api_key_env` and sends it as `Authorization: Bearer`. Use with [AWS Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) or Bedrock-compatible HTTP proxies. No boto3 required.
+- `auth_method: api_key` — reads `BEDROCK_API_KEY` (or `api_key_env` override) as `Authorization: Bearer`. Use with [AWS Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) or Bedrock-compatible HTTP proxies. No boto3 required.
 - `auth_method: profile` — uses `aws_profile` (a named `~/.aws/config` entry: SSO, assumed roles, etc.). Requires `pip install agenttester[aws]`.
 - `auth_method: keys` — reads `aws_access_key_id_env` / `aws_secret_access_key_env`. Requires `pip install agenttester[aws]`.
 - `auth_method: default` (default) — standard boto3 credential chain (env vars, `~/.aws/credentials`, IAM instance role). Requires `pip install agenttester[aws]`.
 
 ```yaml
 providers:
-  # API key — no boto3 required
+  # API key — reads BEDROCK_API_KEY; no boto3 required
   bedrock-apikey:
     type: bedrock
     region: us-east-1
     auth_method: api_key
-    api_key_env: BEDROCK_API_KEY
 
   # Named AWS CLI profile (SSO, assumed roles, etc.)
   bedrock-sso:
@@ -227,7 +235,7 @@ evaluators:
 
 Two auth modes:
 
-- `auth_method: api_key` (default) — reads `api_key_env` and sends it as an `api-key` header (Azure's key-based scheme).
+- `auth_method: api_key` (default) — reads `AZURE_OPENAI_API_KEY` (or `api_key_env` override) and sends it as an `api-key` header.
 - `auth_method: cli` — runs `az account get-access-token` to obtain an Entra ID Bearer token. Requires the Azure CLI and `az login`.
 
 ```yaml
@@ -235,8 +243,7 @@ providers:
   my-azure:
     type: azure
     endpoint: https://my-resource.openai.azure.com
-    auth_method: api_key        # or "cli"
-    api_key_env: AZURE_OPENAI_KEY
+    # reads AZURE_OPENAI_API_KEY automatically; use auth_method: cli for Entra ID
 
 evaluators:
   - name: gpt-4o
@@ -248,7 +255,7 @@ evaluators:
 
 Two auth modes:
 
-- `auth_method: api_key` (default) — reads `api_key_env` and sends it as a standard `Authorization: Bearer` header.
+- `auth_method: api_key` (default) — reads `GOOGLE_API_KEY` (or `api_key_env` override) as `Authorization: Bearer`.
 - `auth_method: cli` — runs `gcloud auth print-access-token`. Requires the Google Cloud SDK and `gcloud auth login`.
 
 ```yaml
@@ -256,8 +263,7 @@ providers:
   my-vertex:
     type: vertex
     endpoint: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/endpoints/openapi
-    auth_method: cli            # or "api_key"
-    api_key_env: VERTEX_TOKEN   # only needed for auth_method: api_key
+    # reads GOOGLE_API_KEY automatically; use auth_method: cli for ADC
 
 evaluators:
   - name: gemini
@@ -286,7 +292,7 @@ models:
   local-llm:
     endpoint: http://localhost:8001 # inline OpenAI-compatible endpoint
     model: meta-llama/Meta-Llama-3-8B-Instruct
-    api_key_env: MY_KEY             # optional bearer token
+    api_key_env: MY_KEY             # optional; overrides the default OPENAI_API_KEY
 ```
 
 Agent entries whose command matches `agent-tester query <endpoint> <model> {prompt}` are also discovered automatically for backward compatibility.
