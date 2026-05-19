@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,52 @@ class TestListAll:
         sessions = ReplSession.list_all(tmp_path)
         assert len(sessions) == 1
         assert sessions[0].id == "good"
+
+
+class TestJsonBackwardsCompat:
+    def _write_json_session(self, d: Path, name: str, histories: dict) -> None:
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{name}.json").write_text(
+            json.dumps(
+                {
+                    "id": name,
+                    "created_at": "2024-01-01T00:00:00+00:00",
+                    "histories": histories,
+                    "branches": [],
+                    "reports": {},
+                    "eval_results": {},
+                }
+            )
+        )
+
+    def test_load_falls_back_to_json(self, tmp_path: Path) -> None:
+        hist = {"m": [{"role": "user", "content": "hi"}]}
+        self._write_json_session(tmp_path, "legacy", hist)
+        s = ReplSession.load("legacy", tmp_path)
+        assert s.id == "legacy"
+        assert s.histories == hist
+
+    def test_yaml_wins_over_json_when_both_exist(self, tmp_path: Path) -> None:
+        self._write_json_session(
+            tmp_path, "both", {"m": [{"role": "user", "content": "json"}]}
+        )
+        s = ReplSession.create("both")
+        s.histories = {"m": [{"role": "user", "content": "yaml"}]}
+        s.save(tmp_path)
+        loaded = ReplSession.load("both", tmp_path)
+        assert loaded.histories["m"][0]["content"] == "yaml"
+
+    def test_list_all_includes_json_sessions(self, tmp_path: Path) -> None:
+        ReplSession.create("new").save(tmp_path)
+        self._write_json_session(tmp_path, "old", {})
+        ids = {s.id for s in ReplSession.list_all(tmp_path)}
+        assert ids == {"new", "old"}
+
+    def test_list_all_deduplicates_when_both_exist(self, tmp_path: Path) -> None:
+        self._write_json_session(tmp_path, "dup", {})
+        ReplSession.create("dup").save(tmp_path)
+        sessions = ReplSession.list_all(tmp_path)
+        assert len([s for s in sessions if s.id == "dup"]) == 1
 
 
 class TestDelete:

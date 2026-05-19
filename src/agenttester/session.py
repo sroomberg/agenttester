@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,8 +51,15 @@ class ReplSession:
 
     @classmethod
     def load(cls, name: str, sessions_dir: Path | None = None) -> ReplSession:
-        path = (sessions_dir or _default_sessions_dir()) / f"{name}.yaml"
-        data = yaml.safe_load(path.read_text()) or {}
+        d = sessions_dir or _default_sessions_dir()
+        yaml_path = d / f"{name}.yaml"
+        json_path = d / f"{name}.json"
+        if yaml_path.exists():
+            data = yaml.safe_load(yaml_path.read_text()) or {}
+        elif json_path.exists():
+            data = json.loads(json_path.read_text())
+        else:
+            raise FileNotFoundError(yaml_path)
         return cls(
             id=data["id"],
             created_at=data["created_at"],
@@ -118,7 +126,13 @@ class ReplSession:
         if not d.exists():
             return []
         sessions = []
-        for p in sorted(d.glob("*.yaml")):
+        seen: set[str] = set()
+        # Yield .yaml first so it wins over a legacy .json with the same stem.
+        all_paths = sorted(d.glob("*.yaml")) + sorted(d.glob("*.json"))
+        for p in all_paths:
+            if p.stem in seen:
+                continue
+            seen.add(p.stem)
             with contextlib.suppress(Exception):
                 sessions.append(cls.load(p.stem, d))
         return sessions
