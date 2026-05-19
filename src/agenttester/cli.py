@@ -13,6 +13,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .branch_manifest import list_branches as _list_manifest_branches
 from .cleanup import run_cleanup
 from .config import (
     GLOBAL_CONFIG_DIR,
@@ -21,9 +22,11 @@ from .config import (
     load_evaluators_and_eval_config,
 )
 from .cost import CostTracker
+from .git_manager import GitManager
 from .orchestrator import Orchestrator
 from .repl import run_repl
 from .server import run_server
+from .session import ReplSession
 from .vllm import query as _vllm_query
 from .watcher import run_watcher
 
@@ -384,6 +387,92 @@ def cleanup(
 ) -> None:
     """Interactively clean up branches from old REPL sessions."""
     run_cleanup(workdir or Path.cwd(), remote=remote)
+
+
+@app.command("sessions")
+def list_sessions(
+    yaml_output: Annotated[
+        bool,
+        typer.Option("--yaml", help="Output as YAML"),
+    ] = False,
+) -> None:
+    """List saved REPL sessions with their branches."""
+    from datetime import datetime, timezone
+
+    import yaml
+
+    all_sessions = ReplSession.list_all()
+    if not all_sessions:
+        if yaml_output:
+            console.print(yaml.dump([]), end="")
+        else:
+            console.print("[dim]No saved sessions found.[/dim]")
+        return
+
+    sessions_dir = GLOBAL_CONFIG_DIR / "sessions"
+
+    local_branches: set[str] = set()
+    with contextlib.suppress(Exception):
+        local_branches = set(GitManager(Path.cwd()).list_agenttester_branches())
+
+    manifest_branches: set[str] = set(_list_manifest_branches().keys())
+
+    def _status(branch: str) -> str:
+        loc = branch in local_branches
+        rem = branch in manifest_branches
+        if loc and rem:
+            return "local,remote"
+        if loc:
+            return "local"
+        if rem:
+            return "remote"
+        return "unknown"
+
+    def _times(s: ReplSession) -> tuple[str, str, str]:
+        """Return (date, start_hms, end_hms)."""
+        dt_str = s.created_at[:19].replace("T", " ")
+        date, start = dt_str.split(" ", 1)
+        end = "-"
+        for ext in ("yaml", "json"):
+            p = sessions_dir / f"{s.id}.{ext}"
+            if p.exists():
+                end = datetime.fromtimestamp(
+                    p.stat().st_mtime, tz=timezone.utc
+                ).strftime("%H:%M:%S")
+                break
+        return date, start, end
+
+    sorted_sessions = sorted(all_sessions, key=lambda s: s.created_at, reverse=True)
+
+    if yaml_output:
+        data = []
+        for s in sorted_sessions:
+            date, start, end = _times(s)
+            data.append(
+                {
+                    "id": s.id,
+                    "date": date,
+                    "start": start,
+                    "end": end,
+                    "branches": [
+                        {"branch": b, "status": _status(b)} for b in s.branches
+                    ],
+                }
+            )
+        rendered = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+        console.print(rendered, end="")
+        return
+
+    max_branch_len = max(
+        (len(b) for s in sorted_sessions for b in s.branches), default=0
+    )
+    for i, s in enumerate(sorted_sessions):
+        if i > 0:
+            console.print()
+        date, start, end = _times(s)
+        console.print(f"{date}  {start}  {end}  {s.id}")
+        for b in s.branches:
+            console.print(f"    {b.ljust(max_branch_len)}  {_status(b)}")
 
 
 @app.command("agents")

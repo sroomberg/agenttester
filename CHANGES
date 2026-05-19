@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.10 — 2026-05-19
+- Add `agent-tester sessions` command: lists sessions newest-first, each showing `date  start  end  id` with branches indented 4 spaces and labeled `local`, `remote`, `local,remote`, or `unknown`; pass `--yaml` for machine-readable output
+
 ## v1.1.9 — 2026-05-19
 - Session loader falls back to legacy `.json` files when no `.yaml` exists; YAML wins when both are present; `list_all` includes both formats without duplicates
 
