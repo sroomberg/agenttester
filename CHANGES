@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.3 — 2026-05-19
+- Update `testing.md` skill: check CI workflow files first for test/lint commands; note they are the source of truth for what must pass
+
 ## v1.1.2 — 2026-05-19
 - Update `testing.md` skill: agents must write tests for new code, match existing conventions, test observable behaviour not internals, one behaviour per test
 

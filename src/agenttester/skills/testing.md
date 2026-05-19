@@ -1,4 +1,8 @@
-After making changes, validate your work by running the existing test suite. Check for test commands in this order: Makefile targets (`make test`), pyproject.toml scripts, package.json scripts, or common test runners (`pytest`, `npm test`, `go test ./...`).
+## Testing Process
+
+After making changes, validate your work by running the existing test suite. Check for test commands in this order: CI workflow files (`.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`), Makefile targets (`make test`), pyproject.toml scripts, package.json scripts, or common test runners (`pytest`, `npm test`, `go test ./...`).
+
+CI workflow files are the most reliable source of truth for how the project is tested and linted — they reflect exactly what must pass before code is merged. If a workflow exists, read it before running tests so you use the same commands, flags, and environment the CI pipeline uses.
 
 In repositories that have linting configured, also run the linter and auto-fix any issues that will not break the code.
 
