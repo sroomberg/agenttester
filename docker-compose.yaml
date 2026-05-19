@@ -12,3 +12,13 @@ services:
       # Pass API keys through to agents
       - ANTHROPIC_API_KEY
       - OPENAI_API_KEY
+      # Azure AI Foundry / Azure OpenAI
+      - AZURE_OPENAI_KEY
+      # GCP Vertex AI
+      - VERTEX_TOKEN
+      # AWS Bedrock
+      - BEDROCK_API_KEY
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - AWS_PROFILE

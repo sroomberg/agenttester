@@ -148,7 +148,7 @@ evaluation:
   max_aggregate_tokens: 2000  # aggregate is summarized before injection if too long
 ```
 
-### Cloud providers (Azure, Bedrock, Vertex)
+### Cloud providers (AWS, Azure, GCP)
 
 Define a `providers` block to share credentials across multiple evaluators or REPL model agents. Each provider entry requires a `type` field. Model-level fields override the provider defaults.
 
@@ -158,9 +158,70 @@ Define a `providers` block to share credentials across multiple evaluators or RE
 |--------|-------------|---------|
 | `openai` | Any OpenAI-compatible endpoint (vLLM, etc.) | built-in |
 | `anthropic` | Direct Anthropic Messages API | built-in |
+| `bedrock` | AWS Bedrock Converse API | built-in (`pip install agenttester[aws]` for boto3 modes) |
 | `azure` | Azure AI Foundry / Azure OpenAI Service | built-in |
 | `vertex` | GCP Vertex AI (OpenAI-compatible endpoint) | built-in |
-| `bedrock` | AWS Bedrock Converse API via boto3 | `pip install agenttester[aws]` |
+
+**OpenAI-compatible providers** (generic)
+
+```yaml
+providers:
+  my-openai:
+    type: openai
+    endpoint: http://localhost:8004
+    api_key_env: MY_KEY
+
+evaluators:
+  - name: llama3
+    provider: my-openai
+    model: meta-llama/Meta-Llama-3-70B-Instruct
+    api_key_env: CUSTOM_KEY   # model-level override
+```
+
+**AWS Bedrock**
+
+Four auth modes via `auth_method`:
+
+- `auth_method: api_key` — reads `api_key_env` and sends it as `Authorization: Bearer`. Use with [AWS Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) or Bedrock-compatible HTTP proxies. No boto3 required.
+- `auth_method: profile` — uses `aws_profile` (a named `~/.aws/config` entry: SSO, assumed roles, etc.). Requires `pip install agenttester[aws]`.
+- `auth_method: keys` — reads `aws_access_key_id_env` / `aws_secret_access_key_env`. Requires `pip install agenttester[aws]`.
+- `auth_method: default` (default) — standard boto3 credential chain (env vars, `~/.aws/credentials`, IAM instance role). Requires `pip install agenttester[aws]`.
+
+```yaml
+providers:
+  # API key — no boto3 required
+  bedrock-apikey:
+    type: bedrock
+    region: us-east-1
+    auth_method: api_key
+    api_key_env: BEDROCK_API_KEY
+
+  # Named AWS CLI profile (SSO, assumed roles, etc.)
+  bedrock-sso:
+    type: bedrock
+    region: us-east-1
+    auth_method: profile
+    aws_profile: my-sso-profile
+
+  # Explicit credentials from environment variables
+  bedrock-keys:
+    type: bedrock
+    region: us-east-1
+    auth_method: keys
+    aws_access_key_id_env: MY_AWS_KEY_ID
+    aws_secret_access_key_env: MY_AWS_SECRET
+    aws_session_token_env: MY_AWS_TOKEN   # optional
+
+  # Default boto3 credential chain
+  bedrock-default:
+    type: bedrock
+    region: us-east-1
+
+evaluators:
+  - name: claude-bedrock
+    provider: bedrock-sso
+    model: anthropic.claude-3-5-sonnet-20241022-v2:0
+```
 
 **Azure AI Foundry**
 
@@ -204,56 +265,9 @@ evaluators:
     model: google/gemini-2.0-flash-001
 ```
 
-CLI tokens (Azure and Vertex) are cached for 55 minutes to avoid extra subprocesses on every request.
+CLI tokens (Azure and GCP) are cached for 55 minutes to avoid extra subprocesses on every request.
 
-**OpenAI-compatible providers** (generic)
-
-```yaml
-providers:
-  my-openai:
-    type: openai
-    endpoint: http://localhost:8004
-    api_key_env: MY_KEY
-
-evaluators:
-  - name: llama3
-    provider: my-openai
-    model: meta-llama/Meta-Llama-3-70B-Instruct
-    api_key_env: CUSTOM_KEY   # model-level override
-```
-
-**AWS Bedrock**
-
-Requires `pip install agenttester[aws]`. Three auth modes are supported; the first configured wins:
-
-```yaml
-providers:
-  # 1. Named AWS CLI profile (SSO, assumed roles, etc.)
-  bedrock-sso:
-    type: bedrock
-    region: us-east-1
-    aws_profile: my-sso-profile
-
-  # 2. Explicit credentials from environment variables
-  bedrock-keys:
-    type: bedrock
-    region: us-east-1
-    aws_access_key_id_env: MY_AWS_KEY_ID
-    aws_secret_access_key_env: MY_AWS_SECRET
-    aws_session_token_env: MY_AWS_TOKEN   # optional
-
-  # 3. Default boto3 credential chain (env vars, ~/.aws/credentials, IAM role)
-  bedrock-default:
-    type: bedrock
-    region: us-east-1
-
-evaluators:
-  - name: claude-bedrock
-    provider: bedrock-sso
-    model: anthropic.claude-3-5-sonnet-20241022-v2:0
-```
-
-REPL models support any provider type — including Bedrock — through a `models:` section that accepts the same `provider` references as evaluators:
+REPL models support any provider type through a `models:` section that accepts the same `provider` references as evaluators:
 
 ```yaml
 models:
@@ -262,8 +276,12 @@ models:
     model: anthropic.claude-3-5-sonnet-20241022-v2:0
 
   azure-gpt4o:
-    provider: azure                 # references a named openai provider
+    provider: my-azure              # references a named azure provider
     model: gpt-4o
+
+  gemini:
+    provider: my-vertex             # references a named vertex provider
+    model: google/gemini-2.0-flash-001
 
   local-llm:
     endpoint: http://localhost:8001 # inline OpenAI-compatible endpoint
@@ -424,12 +442,18 @@ pytest
 
 ## Docker
 
-```bash
-# Run against the current directory
-docker compose run --rm agent-tester run "Fix the bug" --agents claude
+Provider API keys are forwarded automatically from the host environment — set any of `ANTHROPIC_API_KEY`, `AZURE_OPENAI_KEY`, `VERTEX_TOKEN`, `BEDROCK_API_KEY`, or the standard `AWS_*` variables before running.
 
-# Run against a different repo
-REPO_PATH=/path/to/repo docker compose run --rm agent-tester run "Add tests" --agents claude,aider
+```bash
+# Open REPL against the current directory
+docker compose run --rm agent-tester repl --workdir /repo
+
+# Open REPL against a different repo
+REPO_PATH=/path/to/repo docker compose run --rm agent-tester repl --workdir /repo
+
+# Pass a custom config
+REPO_PATH=/path/to/repo docker compose run --rm agent-tester repl \
+  --workdir /repo --config /repo/agent-tester.yaml
 ```
 
 ## Library Usage

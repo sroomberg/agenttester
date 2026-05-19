@@ -606,6 +606,72 @@ class TestBedrockStreamUsage:
         assert result["output_tokens"] == 0
 
 
+class TestBedrockApiKeyAuth:
+    def test_api_key_mode_calls_http_not_boto3(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """api_key auth must bypass boto3 and call _call_api_key_sync."""
+        import json
+
+        monkeypatch.setenv("BEDROCK_KEY", "my-key")
+        response_data = {
+            "output": {
+                "message": {
+                    "content": [{"text": "hello from bedrock"}],
+                }
+            },
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 5, "outputTokens": 3},
+        }
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.read.return_value = json.dumps(response_data).encode()
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
+            p = BedrockProvider(
+                region="us-east-1",
+                auth_method="api_key",
+                api_key_env="BEDROCK_KEY",
+            )
+            result = p._call_api_key_sync("amazon.titan-tg1-large", [], 100)
+
+        mock_open.assert_called_once()
+        req = mock_open.call_args[0][0]
+        assert req.get_header("Authorization") == "Bearer my-key"
+        assert result["content"] == "hello from bedrock"
+        assert result["input_tokens"] == 5
+        assert result["output_tokens"] == 3
+
+    async def test_async_stream_raw_routes_to_api_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("BEDROCK_KEY", "key")
+        p = BedrockProvider(auth_method="api_key", api_key_env="BEDROCK_KEY")
+        expected = {
+            "content": "ok",
+            "tool_calls": None,
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "stop_reason": "end_turn",
+        }
+        with patch.object(p, "_call_api_key_sync", return_value=expected) as mock_fn:
+            result = await p.async_stream_raw("model", [], 100)
+        mock_fn.assert_called_once()
+        assert result == expected
+
+    def test_call_routes_to_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BEDROCK_KEY", "key")
+        p = BedrockProvider(auth_method="api_key", api_key_env="BEDROCK_KEY")
+        with patch.object(
+            p,
+            "_call_api_key_sync",
+            return_value={"content": "hello", "tool_calls": None},
+        ):
+            result = p.call("model", [], 100)
+        assert result == "hello"
+
+
 class TestModelTokenAccumulation:
     async def test_query_async_accumulates_tokens(self) -> None:
         from agenttester.repl import Model, _query_async
@@ -707,7 +773,7 @@ class TestVertexProvider:
     def test_api_key_delegates_to_openai_compat(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agenttester.providers.vertex import VertexProvider
+        from agenttester.providers.gcp import VertexProvider
 
         monkeypatch.setenv("VERTEX_KEY", "vkey")
         p = VertexProvider(
@@ -719,10 +785,10 @@ class TestVertexProvider:
         assert headers["Authorization"] == "Bearer vkey"
 
     def test_cli_auth_sends_bearer(self) -> None:
-        from agenttester.providers.vertex import VertexProvider
+        from agenttester.providers.gcp import VertexProvider
 
         with patch(
-            "agenttester.providers.vertex._fetch_cli_token", return_value="gcp-token"
+            "agenttester.providers.gcp._fetch_cli_token", return_value="gcp-token"
         ):
             p = VertexProvider(
                 endpoint="https://us-central1-aiplatform.googleapis.com/v1beta1/openapi",
@@ -732,9 +798,9 @@ class TestVertexProvider:
         assert headers["Authorization"] == "Bearer gcp-token"
 
     def test_content_type_set_on_cli_auth(self) -> None:
-        from agenttester.providers.vertex import VertexProvider
+        from agenttester.providers.gcp import VertexProvider
 
-        with patch("agenttester.providers.vertex._fetch_cli_token", return_value="t"):
+        with patch("agenttester.providers.gcp._fetch_cli_token", return_value="t"):
             p = VertexProvider(endpoint="https://ep", auth_method="cli")
             headers = p._headers()
         assert headers["Content-Type"] == "application/json"
