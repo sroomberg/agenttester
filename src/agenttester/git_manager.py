@@ -28,6 +28,9 @@ def branch_name(agent_name: str, run_name: str) -> str:
     )
 
 
+_DEFAULT_REMOTE = "origin"
+
+
 def _sanitize_ref_component(name: str) -> str:
     """Sanitize an arbitrary string to be a safe git ref name component.
 
@@ -110,7 +113,7 @@ class GitManager:
         # Prefer the remote URL so the clone can push to the real remote.
         # Fall back to a file:// URI for repos with no configured remote.
         try:
-            clone_url = self.repo.remote("origin").url
+            clone_url = self.repo.remote(_DEFAULT_REMOTE).url
         except Exception:
             clone_url = self.repo_path.as_uri()
 
@@ -124,7 +127,9 @@ class GitManager:
         if session_dir.exists():
             shutil.rmtree(session_dir, ignore_errors=True)
 
-    def list_remote_agenttester_branches(self, remote: str = "origin") -> list[str]:
+    def list_remote_agenttester_branches(
+        self, remote: str = _DEFAULT_REMOTE
+    ) -> list[str]:
         """Return remote branch names under agenttester/ by querying the remote live."""
         try:
             output = self.repo.git.ls_remote("--heads", remote, "agenttester/*")
@@ -156,7 +161,7 @@ class GitManager:
         except GitCommandError:
             return False
 
-    def delete_remote_branch(self, branch: str, remote: str = "origin") -> bool:
+    def delete_remote_branch(self, branch: str, remote: str = _DEFAULT_REMOTE) -> bool:
         """Push a delete refspec for *branch* to *remote*.
 
         Returns True on success.
@@ -177,42 +182,18 @@ class GitManager:
             if not self.repo.remotes:
                 return False
             remote_names = [r.name for r in self.repo.remotes]
-            if "origin" not in remote_names:
+            if _DEFAULT_REMOTE not in remote_names:
                 return False
             self.repo.remotes.origin.pull()
             return True
         except Exception:
             return False
 
-    def get_or_create_worktree(self, agent_name: str, run_name: str) -> Path:
-        """Return an existing worktree or create a new branch + worktree.
-
-        Used when resuming a named REPL session where the branch and
-        worktree may already exist from a previous invocation.
-        """
-        safe_agent = _sanitize_ref_component(agent_name)
-        safe_run = _sanitize_ref_component(run_name)
-        branch = branch_name(agent_name, run_name)
-        worktree_path = self.worktree_base / safe_run / safe_agent
-
-        if worktree_path.exists():
-            return worktree_path
-
-        worktree_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self.repo.git.rev_parse("--verify", branch)
-            # Branch already exists — attach a new worktree to it.
-            self.repo.git.worktree("add", str(worktree_path), branch)
-        except GitCommandError:
-            # Branch does not exist — create branch and worktree together.
-            self.repo.git.worktree("add", "-b", branch, str(worktree_path))
-        return worktree_path
-
     def push_branch(
         self,
         agent_name: str,
         run_name: str,
-        remote: str = "origin",
+        remote: str = _DEFAULT_REMOTE,
         pem_path: str | None = None,
     ) -> None:
         """Push an agent's branch to a remote repository.

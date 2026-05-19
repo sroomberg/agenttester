@@ -17,6 +17,10 @@ from .events import EventLogger
 _DIVIDER = "─" * 60
 _CONSECUTIVE_NEWLINES_RE = re.compile(r"\n{3,}")
 
+_TOOL_ARGS_DISPLAY_LEN = 100
+_TOOL_CALL_DISPLAY_LEN = 120
+_TOOL_RESULT_PREVIEW_LINES = 4
+
 # Matches a full <function_calls>...</function_calls> block (or partial/unclosed)
 _FUNC_CALL_BLOCK_RE = re.compile(
     r"<function_calls>\s*(?:<invoke\s+name=\"([^\"]+)\">\s*"
@@ -88,20 +92,22 @@ def _render_event(console: Console, model_name: str, event: dict) -> None:
     elif event_type == "tool_call":
         if ": " in content:
             tool_name, args = content.split(": ", 1)
-            args_short = args[:100].replace("\n", " ")
+            args_short = args[:_TOOL_ARGS_DISPLAY_LEN].replace("\n", " ")
             console.print(f"  [bold cyan]{tool_name}[/bold cyan]")
             console.print(f"    [dim]{args_short}[/dim]")
         else:
-            console.print(f"  [bold cyan]{content[:120]}[/bold cyan]")
+            truncated = content[:_TOOL_CALL_DISPLAY_LEN]
+            console.print(f"  [bold cyan]{truncated}[/bold cyan]")
     elif event_type == "tool_result":
         lines = content.strip().splitlines()
-        if len(lines) <= 5:
+        if len(lines) <= _TOOL_RESULT_PREVIEW_LINES + 1:
             for line in lines:
                 console.print(f"    [dim]{line}[/dim]")
         else:
-            for line in lines[:4]:
+            for line in lines[:_TOOL_RESULT_PREVIEW_LINES]:
                 console.print(f"    [dim]{line}[/dim]")
-            console.print(f"    [dim]… ({len(lines) - 4} more lines)[/dim]")
+            extra = len(lines) - _TOOL_RESULT_PREVIEW_LINES
+            console.print(f"    [dim]… ({extra} more lines)[/dim]")
     elif event_type == "response":
         console.print(
             Panel(

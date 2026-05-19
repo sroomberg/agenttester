@@ -80,41 +80,10 @@ class TestCommitAll:
         assert not gm.commit_all(wt, "testagent")
 
 
-class TestGetOrCreateWorktree:
-    def test_creates_new_branch_and_worktree(self, tmp_git_repo: Path) -> None:
-        gm = GitManager(tmp_git_repo)
-        wt = gm.get_or_create_worktree("agent1", "sess1")
-        assert wt.exists()
-        repo = git.Repo(tmp_git_repo)
-        branch_names = [b.name for b in repo.branches]
-        assert "agenttester/agent1/sess1" in branch_names
-
-    def test_returns_existing_path_without_recreating(self, tmp_git_repo: Path) -> None:
-        gm = GitManager(tmp_git_repo)
-        wt1 = gm.get_or_create_worktree("agent1", "sess2")
-        (wt1 / "file.txt").write_text("data")
-        wt2 = gm.get_or_create_worktree("agent1", "sess2")
-        assert wt1 == wt2
-        assert (wt2 / "file.txt").exists()
-
-    def test_reattaches_to_existing_branch_after_cleanup(
-        self, tmp_git_repo: Path
-    ) -> None:
-        gm = GitManager(tmp_git_repo)
-        wt = gm.get_or_create_worktree("agent1", "sess3")
-        (wt / "change.txt").write_text("hello")
-        gm.commit_all(wt, "agent1")
-        gm.cleanup_worktree("sess3", "agent1")
-        assert not wt.exists()
-        # Branch still exists — reattach
-        wt2 = gm.get_or_create_worktree("agent1", "sess3")
-        assert wt2.exists()
-
-
 class TestCleanupIfEmpty:
     def test_removes_empty_branch_and_worktree(self, tmp_git_repo: Path) -> None:
         gm = GitManager(tmp_git_repo)
-        wt = gm.get_or_create_worktree("agent1", "sess-empty")
+        wt = gm.create_worktree("agent1", "sess-empty")
         assert wt.exists()
         cleaned = gm.cleanup_if_empty("agent1", "sess-empty")
         assert cleaned is True
@@ -125,7 +94,7 @@ class TestCleanupIfEmpty:
 
     def test_keeps_branch_with_commits(self, tmp_git_repo: Path) -> None:
         gm = GitManager(tmp_git_repo)
-        wt = gm.get_or_create_worktree("agent1", "sess-with-commits")
+        wt = gm.create_worktree("agent1", "sess-with-commits")
         (wt / "work.txt").write_text("some work")
         gm.commit_all(wt, "agent1")
         cleaned = gm.cleanup_if_empty("agent1", "sess-with-commits")

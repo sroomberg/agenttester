@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 import aiohttp
 
-from .base import Provider
+from .base import _API_CALL_TIMEOUT, _API_STREAM_TIMEOUT, Provider
 
 
 def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
@@ -102,9 +102,8 @@ class AnthropicProvider(Provider):
         }
         if system:
             body["system"] = system
-        _timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=300)
         async with (
-            aiohttp.ClientSession(timeout=_timeout) as session,
+            aiohttp.ClientSession(timeout=_API_CALL_TIMEOUT) as session,
             session.post(
                 "https://api.anthropic.com/v1/messages",
                 json=body,
@@ -149,9 +148,8 @@ class AnthropicProvider(Provider):
         text_parts: list[str] = []
         tool_calls: list[dict] = []
 
-        _timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=None)
         async with (
-            aiohttp.ClientSession(timeout=_timeout) as session,
+            aiohttp.ClientSession(timeout=_API_STREAM_TIMEOUT) as session,
             session.post(
                 "https://api.anthropic.com/v1/messages",
                 json=body,

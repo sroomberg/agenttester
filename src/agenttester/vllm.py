@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import aiohttp
 
+from .providers.base import _API_CALL_TIMEOUT
+
 
 async def check_connection(endpoint: str, timeout: int = 5) -> bool:
     """Return True if the vLLM server at *endpoint* is reachable."""
@@ -30,9 +32,8 @@ async def query(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     body = {"model": model_id, "messages": messages, "max_tokens": max_tokens}
-    _timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=300)
     async with (
-        aiohttp.ClientSession(timeout=_timeout) as session,
+        aiohttp.ClientSession(timeout=_API_CALL_TIMEOUT) as session,
         session.post(
             f"{endpoint.rstrip('/')}/v1/chat/completions",
             json=body,

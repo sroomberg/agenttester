@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.20.7 — 2026-05-18
+- Remove dead `get_or_create_worktree()` from `GitManager` (never called in app code)
+- Add `_DEFAULT_REMOTE = "origin"` constant to `git_manager.py`; replace all internal hardcoded `"origin"` strings and function-signature defaults
+- Rename `_DEFAULT_MAX_TURNS` in `repl.py` to `_REPL_MAX_TURNS` to distinguish it from `loop.py`'s `_DEFAULT_MAX_TURNS = 20` (different defaults, different purposes)
+- Add `_API_CALL_TIMEOUT` and `_API_STREAM_TIMEOUT` constants to `providers/base.py`; replace five duplicated `aiohttp.ClientTimeout(...)` constructions across `anthropic.py`, `openai_compat.py`, and `vllm.py`
+- Extract `_make_result()` factory to module level in `agent_runner.py`; both `_run_local` and `_run_remote` now delegate to the shared function
+
+## v0.20.6 — 2026-05-18
+- Add `workdir` property, `save_messages`, `restore_messages`, `add_message`, `pop_message` to `Model`; `_query_async` now uses these instead of reaching into `model.messages` directly; `_run_report` uses `model.workdir` instead of `model.tool_executor.workdir`
+- Add `_CTRL_C_TIMEOUT` and `_BRANCH_SLUG_MAX_LEN` constants to `repl.py`; replace all magic `2.0` and `60` literals in the REPL loop
+- Fix hardcoded `~/.config/agenttester/repl_history` path in `run_repl` — now uses `GLOBAL_CONFIG_DIR`
+- Rename `session_obj` → `_prompt_session` for naming consistency with other `_*` locals in `run_repl`
+- Add `_TOOL_ARGS_DISPLAY_LEN`, `_TOOL_CALL_DISPLAY_LEN`, `_TOOL_RESULT_PREVIEW_LINES` constants to `watcher.py`; replace inline magic literals in `_render_event`
+
 ## v0.20.5 — 2026-05-18
 - Fix `datetime.utcnow()` (naive UTC) → `datetime.now(timezone.utc)` in `cost/tracker.py`
 - Remove unused `_AT_PATTERN` regex from `repl.py`

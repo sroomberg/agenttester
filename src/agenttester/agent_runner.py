@@ -81,6 +81,24 @@ def _build_ssh_command(
 # ── core entry point ──────────────────────────────────────────────────
 
 
+def _make_result(
+    agent: AgentConfig,
+    start: float,
+    stdout_lines: list[str],
+    stderr_lines: list[str],
+    exit_code: int,
+    error: str | None = None,
+) -> AgentResult:
+    return AgentResult(
+        agent_name=agent.name,
+        exit_code=exit_code,
+        duration=time.monotonic() - start,
+        stdout="\n".join(stdout_lines),
+        stderr="\n".join(stderr_lines),
+        error=error,
+    )
+
+
 def _prepare_command(agent: AgentConfig, prompt: str) -> tuple[str, Path | None, bool]:
     """Substitute placeholders and decide stdin mode.
 
@@ -150,14 +168,7 @@ async def _run_local(
     last_output = [time.monotonic()]
 
     def _result(exit_code: int, error: str | None = None) -> AgentResult:
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=exit_code,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-            error=error,
-        )
+        return _make_result(agent, start, stdout_lines, stderr_lines, exit_code, error)
 
     proc: asyncio.subprocess.Process | None = None
     try:
@@ -276,14 +287,7 @@ async def _run_remote(
     stderr_lines: list[str] = []
 
     def _result(exit_code: int, error: str | None = None) -> AgentResult:
-        return AgentResult(
-            agent_name=agent.name,
-            exit_code=exit_code,
-            duration=time.monotonic() - start,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-            error=error,
-        )
+        return _make_result(agent, start, stdout_lines, stderr_lines, exit_code, error)
 
     try:
         # 1. Push worktree to remote

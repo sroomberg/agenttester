@@ -20,7 +20,12 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 
-from .config import _build_named_provider, _load_yaml, get_config_paths
+from .config import (
+    GLOBAL_CONFIG_DIR,
+    _build_named_provider,
+    _load_yaml,
+    get_config_paths,
+)
 from .events import EventLogger
 from .git_manager import GitManager, _sanitize_ref_component, branch_name
 from .loop import run_agent_loop
@@ -40,9 +45,11 @@ _COMMAND_PATTERN = re.compile(
     r"agent-?tester\s+query\s+(https?://\S+)\s+(\S+)\s+\{prompt\}"
 )
 
-_DEFAULT_MAX_TURNS = 100
+_REPL_MAX_TURNS = 100
 _DEFAULT_MAX_TOKENS = 4096
 _MAX_DIFF_CHARS = 4000
+_CTRL_C_TIMEOUT = 2.0
+_BRANCH_SLUG_MAX_LEN = 60
 
 _SLASH_COMMANDS = [
     ("/reset", "clear conversation history"),
@@ -92,7 +99,7 @@ class Model:
     model_id: str
     provider: Provider
     max_tokens: int = _DEFAULT_MAX_TOKENS
-    max_turns: int = _DEFAULT_MAX_TURNS
+    max_turns: int = _REPL_MAX_TURNS
     # --- mutable runtime state ---
     messages: list[dict] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
@@ -121,6 +128,28 @@ class Model:
                 self.tool_executor.set_event_handler(
                     _make_event_handler(self.event_logger)
                 )
+
+    @property
+    def workdir(self) -> str | None:
+        """Return the working directory for this model's tool executor."""
+        return self.tool_executor.workdir if self.tool_executor else None
+
+    def save_messages(self) -> list[dict]:
+        """Return a snapshot of the message history for rollback."""
+        return list(self.messages)
+
+    def restore_messages(self, saved: list[dict]) -> None:
+        """Restore messages to a previously saved state."""
+        self.messages[:] = saved
+
+    def add_message(self, role: str, content: str) -> None:
+        """Append a message to the conversation history."""
+        self.messages.append({"role": role, "content": content})
+
+    def pop_message(self) -> None:
+        """Remove the last message from the conversation history."""
+        if self.messages:
+            self.messages.pop()
 
 
 def _provider_label(m: Model) -> str:
@@ -162,7 +191,7 @@ def _parse_models_from_file(path: Path) -> dict[str, Model]:
             model_id=model_cfg["model"],
             provider=prov,
             max_tokens=model_cfg.get("max_tokens", _DEFAULT_MAX_TOKENS),
-            max_turns=model_cfg.get("max_turns", _DEFAULT_MAX_TURNS),
+            max_turns=model_cfg.get("max_turns", _REPL_MAX_TURNS),
         )
 
     # Backward compat: discover OpenAI-compatible models from agent commands
@@ -214,7 +243,7 @@ async def _query_async(
     if model.tool_executor and isinstance(
         model.provider, (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
     ):
-        saved = list(model.messages)
+        saved = model.save_messages()
         try:
             return await run_agent_loop(
                 model.provider,
@@ -229,13 +258,13 @@ async def _query_async(
                 model_name=model.name,
             )
         except Exception as e:
-            model.messages[:] = saved
+            model.restore_messages(saved)
             return f"[error] {e}"
 
     streaming_providers = (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
     if isinstance(model.provider, streaming_providers):
         # Streaming, no tool use — stream text chunks directly.
-        model.messages.append({"role": "user", "content": prompt})
+        model.add_message("user", prompt)
         parts: list[str] = []
 
         def _on_chunk(chunk: str) -> None:
@@ -249,21 +278,21 @@ async def _query_async(
             )
             reply = result.get("content") or "".join(parts)
         except Exception as e:
-            model.messages.pop()
+            model.pop_message()
             return f"[error] {e}"
-        model.messages.append({"role": "assistant", "content": reply})
+        model.add_message("assistant", reply)
         return reply
 
     # Bedrock and other providers: use async_call
-    model.messages.append({"role": "user", "content": prompt})
+    model.add_message("user", prompt)
     try:
         reply = await model.provider.async_call(
             model.model_id, model.messages, max_tokens
         )
     except Exception as e:
-        model.messages.pop()
+        model.pop_message()
         return f"[error] {e}"
-    model.messages.append({"role": "assistant", "content": reply})
+    model.add_message("assistant", reply)
     return reply
 
 
@@ -307,7 +336,7 @@ def _clean_name(raw: str) -> str:
     """Extract and sanitize a branch-name token from a model reply."""
     line = raw.strip().split("\n")[0].strip().strip("`\"' ")
     token = line.split()[0] if line.split() else ""
-    return _sanitize_ref_component(token.lower()[:60])
+    return _sanitize_ref_component(token.lower()[:_BRANCH_SLUG_MAX_LEN])
 
 
 def _best_name(names: list[str]) -> str:
@@ -409,11 +438,10 @@ async def _run_report(
     """Collect each model's work and display a summary. Populates *reports_store*."""
 
     async def _fetch(name: str, model: Model) -> tuple[str, dict[str, str]]:
-        if not model.tool_executor:
+        workdir = model.workdir
+        if workdir is None:
             return name, {"commits": "", "diff": "", "stat": ""}
-        return name, await asyncio.to_thread(
-            _collect_work_report, model.tool_executor.workdir
-        )
+        return name, await asyncio.to_thread(_collect_work_report, workdir)
 
     fetched = dict(await asyncio.gather(*[_fetch(n, m) for n, m in models.items()]))
     reports_store.clear()
@@ -744,7 +772,7 @@ async def run_repl(
         " @model <msg> to address one model, exit or Ctrl-C to quit[/dim]\n"
     )
 
-    history_file = Path.home() / ".config" / "agenttester" / "repl_history"
+    history_file = GLOBAL_CONFIG_DIR / "repl_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     _session_branch_slug: str | None = None
@@ -756,7 +784,7 @@ async def run_repl(
     _reports: dict[str, dict[str, str]] = {}
 
     def _toolbar() -> HTML:
-        if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < 2.0:
+        if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < _CTRL_C_TIMEOUT:
             return HTML("<ansired>Press Ctrl-C to exit</ansired>")
         waiting_names = {q.model_name for q in question_registry.pending()}
         n_running = len(_busy_models - waiting_names)
@@ -770,7 +798,7 @@ async def run_repl(
             return HTML("<ansigreen>ready</ansigreen>")
         return HTML(" | ".join(parts))
 
-    session_obj: PromptSession = PromptSession(
+    _prompt_session: PromptSession = PromptSession(
         completer=_ModelCompleter(list(models)),
         history=FileHistory(str(history_file)),
         bottom_toolbar=_toolbar,
@@ -778,11 +806,11 @@ async def run_repl(
 
     async def _clear_ctrl_c_after_delay() -> None:
         nonlocal _ctrl_c_at, _ctrl_c_clear_task
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(_CTRL_C_TIMEOUT)
         _ctrl_c_at = None
         _ctrl_c_clear_task = None
         with contextlib.suppress(Exception):
-            session_obj.app.invalidate()
+            _prompt_session.app.invalidate()
 
     _stdout_ctx = patch_stdout(raw=True)
     _stdout_ctx.__enter__()
@@ -791,11 +819,11 @@ async def run_repl(
             _background_tasks -= {t for t in _background_tasks if t.done()}
 
             try:
-                raw = await session_obj.prompt_async("> ")
+                raw = await _prompt_session.prompt_async("> ")
                 _ctrl_c_at = None
             except KeyboardInterrupt:
                 now = time.monotonic()
-                if _ctrl_c_at is not None and (now - _ctrl_c_at) < 2.0:
+                if _ctrl_c_at is not None and (now - _ctrl_c_at) < _CTRL_C_TIMEOUT:
                     break
                 if _ctrl_c_clear_task is not None:
                     _ctrl_c_clear_task.cancel()
@@ -860,7 +888,9 @@ async def run_repl(
                         target_models, prompt_text, git_mgr, console
                     )
                 else:
-                    feature_slug = _sanitize_ref_component(prompt_text[:60])
+                    feature_slug = _sanitize_ref_component(
+                        prompt_text[:_BRANCH_SLUG_MAX_LEN]
+                    )
                 _session_branch_slug = f"{short_session}-{feature_slug}"
                 for m in models.values():
                     b = branch_name(m.name, _session_branch_slug)
@@ -890,7 +920,10 @@ async def run_repl(
             for _nm, m in target_models.items():
                 if m.event_logger is not None:
                     m.event_logger.log("prompt", prompt_text)
-                    m.event_logger.log("status", f'working on "{prompt_text[:60]}"')
+                    m.event_logger.log(
+                        "status",
+                        f'working on "{prompt_text[:_BRANCH_SLUG_MAX_LEN]}"',
+                    )
 
             n = len(target_models)
             label = "model" if n == 1 else "models"

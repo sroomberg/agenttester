@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 import aiohttp
 
-from .base import Provider
+from .base import _API_CALL_TIMEOUT, _API_STREAM_TIMEOUT, Provider
 
 
 class OpenAICompatProvider(Provider):
@@ -33,9 +33,8 @@ class OpenAICompatProvider(Provider):
         self, model: str, messages: list[dict], max_tokens: int
     ) -> str:
         body: dict = {"model": model, "messages": messages, "max_tokens": max_tokens}
-        _timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=300)
         async with (
-            aiohttp.ClientSession(timeout=_timeout) as session,
+            aiohttp.ClientSession(timeout=_API_CALL_TIMEOUT) as session,
             session.post(
                 f"{self.endpoint.rstrip('/')}/v1/chat/completions",
                 json=body,
@@ -70,10 +69,8 @@ class OpenAICompatProvider(Provider):
         text_parts: list[str] = []
         tool_calls_acc: dict[int, dict] = {}
 
-        # No read timeout: let the model stream as long as it needs.
-        _timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=None)
         async with (
-            aiohttp.ClientSession(timeout=_timeout) as session,
+            aiohttp.ClientSession(timeout=_API_STREAM_TIMEOUT) as session,
             session.post(
                 f"{self.endpoint.rstrip('/')}/v1/chat/completions",
                 json=body,
