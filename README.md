@@ -1,7 +1,5 @@
 # AgentTester
 
-> **⚠️ Experimental** — This project is under active development. APIs, config format, and CLI flags may change without notice.
-
 Send a single prompt to multiple coding agents running in parallel and compare the results. Each agent works in its own [git worktree](https://git-scm.com/docs/git-worktree) on a separate branch so they never interfere with each other. Optionally, configure LLM evaluators to review each agent's diff and drive an iterative refinement loop.
 
 ## Install

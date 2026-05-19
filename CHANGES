@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.0 — 2026-05-18
+- Promote to stable 1.0.0; remove experimental warning from README
+
 ## v0.20.7 — 2026-05-18
 - Remove dead `get_or_create_worktree()` from `GitManager` (never called in app code)
 - Add `_DEFAULT_REMOTE = "origin"` constant to `git_manager.py`; replace all internal hardcoded `"origin"` strings and function-signature defaults
