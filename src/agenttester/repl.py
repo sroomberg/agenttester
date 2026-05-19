@@ -35,7 +35,6 @@ from .providers import (
     OpenAICompatProvider,
     Provider,
 )
-from .questions import QuestionRegistry
 from .session import ReplSession
 from .skills import load_skills
 from .tools import ToolExecutor
@@ -53,8 +52,7 @@ _BRANCH_SLUG_MAX_LEN = 60
 
 _SLASH_COMMANDS = [
     ("/reset", "clear conversation history"),
-    ("/status", "show running/waiting/idle models"),
-    ("/reply", "send a response to a waiting model"),
+    ("/status", "show running/idle models"),
     ("/report", "show each model's work summary (commits + diff stats)"),
     ("/evaluate", "cross-evaluate: each model reviews the others' work"),
     ("/iterate", "send iteration prompt incorporating peer evaluations"),
@@ -113,14 +111,12 @@ class Model:
         workdir: str,
         pem_path: str | None = None,
         notify_url: str | None = None,
-        question_registry: QuestionRegistry | None = None,
     ) -> None:
         self.tool_executor = ToolExecutor(
             workdir=workdir,
             pem_path=pem_path,
             model_name=self.name,
             notify_url=notify_url,
-            question_registry=question_registry,
         )
 
     def wire_event_logger(self, session_name: str) -> None:
@@ -238,7 +234,6 @@ async def _query_async(
     prompt: str,
     max_tokens: int = 2048,
     on_event: Callable[[str, str], None] | None = None,
-    question_registry: QuestionRegistry | None = None,
 ) -> str:
     """Async query path: uses the full streaming agent loop for OpenAI/Anthropic
     providers; falls back to async_call for Bedrock and other providers.
@@ -257,7 +252,6 @@ async def _query_async(
                 max_turns=model.max_turns,
                 max_tokens=model.max_tokens,
                 on_event=on_event,
-                question_registry=question_registry,
                 model_name=model.name,
             )
         except Exception as e:
@@ -323,15 +317,9 @@ async def _run_one(
     model: Model,
     prompt: str,
     on_event: Callable[[str, str], None] | None = None,
-    question_registry: QuestionRegistry | None = None,
 ) -> tuple[str, str]:
     try:
-        r = await _query_async(
-            model,
-            prompt,
-            on_event=on_event,
-            question_registry=question_registry,
-        )
+        r = await _query_async(model, prompt, on_event=on_event)
     except Exception as exc:
         r = str(exc)
     return name, r
@@ -696,7 +684,6 @@ def _setup_git_and_tools(
     session_name: str,
     pem_path: str | None,
     notify_url: str | None,
-    question_registry: QuestionRegistry,
     console: Console,
     session_branches: list[str] | None = None,
 ) -> GitManager | None:
@@ -723,7 +710,6 @@ def _setup_git_and_tools(
                     workdir=str(clone_path),
                     pem_path=pem_path,
                     notify_url=notify_url,
-                    question_registry=question_registry,
                 )
             clones_dir = git_mgr.worktree_base / session_name
             console.print(f"[dim]Each model working in {clones_dir}[/dim]")
@@ -745,7 +731,6 @@ def _setup_git_and_tools(
             workdir=str(workdir_path),
             pem_path=pem_path,
             notify_url=notify_url,
-            question_registry=question_registry,
         )
     return None
 
@@ -774,31 +759,6 @@ def _attach_event_loggers(models: dict[str, Model], session_name: str) -> None:
 # ---------------------------------------------------------------------------
 # REPL loop helpers
 # ---------------------------------------------------------------------------
-
-
-def _handle_reply(
-    raw: str,
-    question_registry: QuestionRegistry,
-    console: Console,
-) -> bool:
-    """Handle /reply commands. Returns True if the input was consumed."""
-    if not raw.startswith("/reply "):
-        return False
-    rest = raw[7:].strip()
-    if not rest.startswith("@"):
-        console.print("[yellow]Usage: /reply @model <response>[/yellow]\n")
-        return True
-    parts = rest[1:].split(None, 1)
-    target = parts[0] if parts else ""
-    response_text = parts[1] if len(parts) > 1 else ""
-    if not response_text:
-        console.print("[yellow]Usage: /reply @model <response>[/yellow]\n")
-        return True
-    if question_registry.respond(target, response_text):
-        console.print(f"[dim]Sent response to {target}.[/dim]\n")
-    else:
-        console.print(f"[yellow]{target} is not waiting for a response.[/yellow]\n")
-    return True
 
 
 def _resolve_targets(
@@ -845,14 +805,12 @@ async def run_repl(
         return
 
     session, session_name, _is_new_session = _init_session(session_name, console)
-    question_registry = QuestionRegistry()
     git_mgr = _setup_git_and_tools(
         workdir,
         models,
         session_name,
         pem_path,
         notify_url,
-        question_registry,
         console,
         session_branches=session.branches,
     )
@@ -865,7 +823,7 @@ async def run_repl(
         console.print("[dim]Skills loaded into context.[/dim]")
 
     console.print(
-        "\n[dim]Commands: /reset (clear history), /reply @model <response>,"
+        "\n[dim]Commands: /reset (clear history),"
         " @model <msg> to address one model, exit or Ctrl-C to quit[/dim]\n"
     )
 
@@ -889,14 +847,9 @@ async def run_repl(
     def _toolbar() -> HTML:
         if _ctrl_c_at is not None and (time.monotonic() - _ctrl_c_at) < _CTRL_C_TIMEOUT:
             return HTML("<ansired>Press Ctrl-C to exit</ansired>")
-        waiting_names = {q.model_name for q in question_registry.pending()}
-        n_running = len(_busy_models - waiting_names)
-        n_waiting = len(waiting_names)
         parts: list[str] = []
-        if n_running:
-            parts.append(f"<ansigreen>{n_running} running</ansigreen>")
-        if n_waiting:
-            parts.append(f"<ansiyellow>{n_waiting} waiting</ansiyellow>")
+        if _busy_models:
+            parts.append(f"<ansigreen>{len(_busy_models)} running</ansigreen>")
         if _eval_total > 0:
             parts.append(
                 f"<ansicyan>evaluating ({_eval_done}/{_eval_total})</ansicyan>"
@@ -988,7 +941,6 @@ async def run_repl(
                                         _m,
                                         _p,
                                         _make_event_handler(_m.event_logger),
-                                        question_registry,
                                     )
                                 except asyncio.CancelledError:
                                     if _m.event_logger is not None:
@@ -1032,11 +984,8 @@ async def run_repl(
 
             if raw == "/status":
                 _background_tasks -= {t for t in _background_tasks if t.done()}
-                waiting_names = {q.model_name for q in question_registry.pending()}
                 for name in models:
-                    if name in waiting_names:
-                        console.print(f"  [yellow]⏸ {name}[/yellow]  waiting")
-                    elif name in _busy_models:
+                    if name in _busy_models:
                         console.print(f"  [green]● {name}[/green]  running")
                     else:
                         console.print(f"  [dim]○ {name}[/dim]  idle")
@@ -1153,9 +1102,6 @@ async def run_repl(
                 _pending_iterate = iter_prompt
                 continue
 
-            if _handle_reply(raw, question_registry, console):
-                continue
-
             resolved = _resolve_targets(raw, models, console)
             if resolved is None:
                 continue
@@ -1196,8 +1142,8 @@ async def run_repl(
                 }
             if not target_models:
                 console.print(
-                    "[yellow]All target models are busy. Use /reply "
-                    "or wait for them to finish.[/yellow]\n"
+                    "[yellow]All target models are busy. "
+                    "Wait for them to finish.[/yellow]\n"
                 )
                 continue
 
@@ -1229,7 +1175,6 @@ async def run_repl(
                             _m,
                             _prompt,
                             _make_event_handler(_m.event_logger),
-                            question_registry,
                         )
                     except asyncio.CancelledError:
                         if _m.event_logger is not None:
@@ -1249,7 +1194,6 @@ async def run_repl(
                 _background_tasks.add(asyncio.create_task(_background_run()))
     finally:
         _stdout_ctx.__exit__(None, None, None)
-        question_registry.cancel_all()
 
         if _background_tasks:
             console.print(

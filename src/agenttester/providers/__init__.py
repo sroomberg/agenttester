@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from .anthropic import (
-    AnthropicProvider,
-    _to_anthropic_messages,
-    _to_anthropic_tools,
-)
+from .anthropic import AnthropicProvider
 from .base import Provider
 from .bedrock import BedrockProvider
 from .openai_compat import OpenAICompatProvider
@@ -16,6 +12,4 @@ __all__ = [
     "BedrockProvider",
     "OpenAICompatProvider",
     "Provider",
-    "_to_anthropic_messages",
-    "_to_anthropic_tools",
 ]

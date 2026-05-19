@@ -13,9 +13,8 @@ from agenttester.providers import (
     BedrockProvider,
     OpenAICompatProvider,
     Provider,
-    _to_anthropic_messages,
-    _to_anthropic_tools,
 )
+from agenttester.providers.anthropic import _to_anthropic_messages, _to_anthropic_tools
 
 
 @contextmanager
@@ -577,11 +576,7 @@ class TestBedrockStreamUsage:
                         "contentBlockIndex": 0,
                     }
                 },
-                {
-                    "metadata": {
-                        "usage": {"inputTokens": 200, "outputTokens": 75}
-                    }
-                },
+                {"metadata": {"usage": {"inputTokens": 200, "outputTokens": 75}}},
             ]
         }
         with _boto3_mock(mock_client):

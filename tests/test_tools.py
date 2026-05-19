@@ -282,19 +282,6 @@ class TestToolDefinitions:
         names = [t["function"]["name"] for t in ex.tool_definitions]
         assert "notify" in names
 
-    def test_ask_user_excluded_without_registry(self, tmp_path: Path) -> None:
-        ex = ToolExecutor(workdir=str(tmp_path))
-        names = [t["function"]["name"] for t in ex.tool_definitions]
-        assert "ask_user" not in names
-
-    def test_ask_user_included_with_registry(self, tmp_path: Path) -> None:
-        from agenttester.questions import QuestionRegistry
-
-        registry = QuestionRegistry()
-        ex = ToolExecutor(workdir=str(tmp_path), question_registry=registry)
-        names = [t["function"]["name"] for t in ex.tool_definitions]
-        assert "ask_user" in names
-
     def test_base_tools_always_present(self, tmp_path: Path) -> None:
         ex = ToolExecutor(workdir=str(tmp_path))
         names = [t["function"]["name"] for t in ex.tool_definitions]
@@ -375,66 +362,3 @@ class TestNotify:
         ):
             result = ex.execute("notify", {"result": "done"})
         assert "Notify failed" in result
-
-
-# ---------------------------------------------------------------------------
-# ask_user tool
-# ---------------------------------------------------------------------------
-
-
-class TestAskUser:
-    def test_without_registry_returns_error(self, tmp_path: Path) -> None:
-        ex = ToolExecutor(workdir=str(tmp_path))
-        result = ex.execute("ask_user", {"question": "hello?"})
-        assert "not available" in result
-
-    def test_blocks_and_returns_response(self, tmp_path: Path) -> None:
-        import threading
-
-        from agenttester.questions import QuestionRegistry
-
-        registry = QuestionRegistry()
-        ex = ToolExecutor(
-            workdir=str(tmp_path),
-            model_name="test-model",
-            question_registry=registry,
-        )
-        result_holder: list[str] = []
-
-        def ask():
-            result_holder.append(ex.execute("ask_user", {"question": "which file?"}))
-
-        t = threading.Thread(target=ask)
-        t.start()
-        import time
-
-        time.sleep(0.05)
-        registry.respond("test-model", "main.py")
-        t.join(timeout=1)
-        assert result_holder == ["main.py"]
-
-    def test_emits_waiting_event(self, tmp_path: Path) -> None:
-        import threading
-
-        from agenttester.questions import QuestionRegistry
-
-        registry = QuestionRegistry()
-        events: list[tuple[str, str]] = []
-        ex = ToolExecutor(
-            workdir=str(tmp_path),
-            model_name="m1",
-            question_registry=registry,
-            on_event=lambda t, c: events.append((t, c)),
-        )
-
-        def ask():
-            ex.execute("ask_user", {"question": "approve?"})
-
-        t = threading.Thread(target=ask)
-        t.start()
-        import time
-
-        time.sleep(0.05)
-        registry.respond("m1", "yes")
-        t.join(timeout=1)
-        assert ("waiting", "approve?") in events

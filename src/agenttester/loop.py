@@ -9,7 +9,6 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from .questions import QuestionRegistry
 from .tools import ToolExecutor
 
 _DEFAULT_MAX_TURNS = 20
@@ -100,17 +99,12 @@ async def run_agent_loop(
     max_turns: int = _DEFAULT_MAX_TURNS,
     max_tokens: int = 4096,
     on_event: Callable[[str, str], None] | None = None,
-    question_registry: QuestionRegistry | None = None,
     model_name: str | None = None,
 ) -> str:
     """Async tool-use agent loop, mutating *messages* in place.
 
     Appends the user message, all assistant/tool turns, and the final
     assistant response to *messages*.  Returns the final text response.
-
-    When max_turns is exhausted and a question_registry is provided, the
-    loop pauses and asks the user for a continuation prompt rather than
-    giving up.
 
     on_event(type, content) is called for observability:
         "chunk"       → streaming text chunk (fires many times per turn)
@@ -206,27 +200,4 @@ async def run_agent_loop(
                     {"role": "user", "content": f"Tool results:\n{results_text}"}
                 )
 
-        # Max turns exhausted — ask user whether to continue
-        if question_registry and model_name:
-            if on_event:
-                on_event(
-                    "status",
-                    f"reached {turns_used} turns — waiting for instructions",
-                )
-            continuation = await asyncio.to_thread(
-                question_registry.ask,
-                model_name,
-                f"Reached {turns_used} tool turns without a final response. "
-                "Send a message to continue, or reply 'stop' to end.",
-            )
-            if continuation is None:
-                # Timed out or session exiting — stop cleanly without
-                # polluting message history. The conversation can be
-                # resumed later with a new prompt.
-                return ""
-            if continuation.lower().strip() in ("stop", "quit", "exit"):
-                return ""
-            messages.append({"role": "user", "content": continuation})
-            turns_used = 0
-        else:
-            return ""
+        return ""

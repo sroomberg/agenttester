@@ -128,11 +128,6 @@ class TestRenderEvent:
         out = self._render({"type": "unknown", "content": "x"})
         assert out.strip() == ""
 
-    def test_waiting_rendered(self) -> None:
-        out = self._render({"type": "waiting", "content": "which file?"})
-        assert "which file?" in out
-        assert "/reply @test-model" in out
-
 
 class TestFormatResponse:
     """Test _format_response and _collapse_blank_lines."""

@@ -12,7 +12,6 @@ from rich.console import Console
 
 from .agent_runner import AgentResult, run_agent
 from .config import AgentConfig, EvaluationConfig, EvaluatorConfig, _make_run_slug
-from .cost import CostTracker
 from .evaluator import (
     EvaluatorResult,
     aggregate_evaluations,
@@ -112,7 +111,6 @@ class Orchestrator:
         self.reports_dir = reports_dir
         self.git = GitManager(repo_path)
         self.console = console
-        self.cost_tracker = CostTracker()
         self.skills = load_skills(repo_path)
 
     async def _run_one(
@@ -363,12 +361,6 @@ class Orchestrator:
                 )
                 report_path.write_text(report)
                 self.console.print(f"\n[bold]Report:[/bold] {report_path}")
-
-                self.cost_tracker.record_run(
-                    run_name,
-                    results,
-                    {"prompt_length": len(prompt), "iteration": iteration},
-                )
 
                 if not evaluators:
                     break

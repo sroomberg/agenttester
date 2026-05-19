@@ -116,12 +116,6 @@ def _render_event(console: Console, model_name: str, event: dict) -> None:
                 border_style="blue",
             )
         )
-    elif event_type == "waiting":
-        console.print(
-            f"\n[bold yellow]⏸ Waiting for your response:[/bold yellow]\n"
-            f"  {content}\n"
-            f"[dim]Reply with: /reply @{model_name} <your response>[/dim]\n"
-        )
     elif event_type == "status":
         console.print(f"[dim]● {content}[/dim]")
 

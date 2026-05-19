@@ -270,9 +270,20 @@ agent-tester repl --workdir /path/to/repo # enable tool use with a target repo
 ```
 
 The REPL fans out each prompt to all configured models in parallel and maintains separate
-conversation history per model. Use `/reset` to clear history, `@modelname message` to
-address a single model, or `exit` / Ctrl-C to quit. Tab-completes model names after `@`.
+conversation history per model. Tab-completes model names after `@` and slash-commands.
 Prompt history is persisted across invocations in `~/.config/agenttester/repl_history`.
+
+### Slash commands
+
+| Command | Description |
+|---------|-------------|
+| `/reset` | Clear conversation history for all models |
+| `/status` | Show which models are running or idle |
+| `/report` | Show each model's git commits, diff stats, and token usage |
+| `/evaluate [m1,m2,…]` | Cross-evaluate: each model reviews the others' work. Optionally pass a comma-separated list to limit which models act as reviewers. Evaluation documents are saved as Markdown to `.agenttester/evaluations/<session>/`. |
+| `/iterate <prompt>` | After `/evaluate`, inject each model's peer evaluations as context and send an iteration prompt. Shows a per-model plan and requires `y` confirmation before sending. |
+
+Use `@modelname message` to address a single model. Use `exit` or Ctrl-C to quit.
 
 ### Sessions
 
@@ -286,7 +297,17 @@ bye  —  agent-tester --resume 3f2a1b4c-8d9e-4f0a-b1c2-d3e4f5a6b7c8
 ```
 
 Each model's conversation history is saved on exit to
-`~/.config/agenttester/sessions/<session-id>.json` and restored on resume.
+`~/.config/agenttester/sessions/<session-id>.yaml` and restored on resume.
+
+List previous sessions:
+
+```bash
+agent-tester sessions          # human-readable, newest first
+agent-tester sessions --yaml   # machine-readable YAML
+```
+
+Each session entry shows its date, start/end times, and associated branches with their
+availability (`local`, `remote`, `local,remote`, or `unknown`).
 
 ### Watcher
 
@@ -306,15 +327,15 @@ sending prompts.
 
 Pass `--workdir <dir>` to enable an agent loop for OpenAI-compatible and Anthropic models.
 Each model gains access to `bash`, `read_file`, `write_file`, `git_clone`, `git_commit`,
-and `git_push` tools. When `--workdir` is a git repo, each model works in its own worktree
-on a dedicated branch.
+and `git_push` tools. When `--workdir` is a git repo, each model works in its own clone
+under `.agenttester/worktrees/<session-id>/` on a dedicated branch.
 
 Before the first prompt is dispatched, all models negotiate a branch name in up to two
 rounds (silent LLM calls that don't affect conversation history). The agreed name is
-combined with the HEAD commit hash:
+combined with a short session hash:
 
 ```
-agenttester/<model-name>/<8-char-hash>-<feature-name>
+agenttester/<model-name>/<8-char-session>-<feature-name>
 ```
 
 The branch is created lazily on the first write and reused for all subsequent prompts in
@@ -341,7 +362,8 @@ agent-tester cleanup --workdir /path/to/repo
 
 The command walks you through two phases — select sessions to delete entirely, then pick
 individual model branches from remaining sessions — then asks whether to delete locally,
-remotely, or both before executing.
+remotely, or both before executing. Session records (history, reports, eval results) are
+preserved unless you explicitly approve their deletion.
 
 Config resolution follows the same priority as `run`: global config first, then local
 (or explicit) config, with local taking precedence on conflicts.

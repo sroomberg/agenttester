@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.2 — 2026-05-19
+- Remove `/reply` command, `QuestionRegistry`, and `ask_user` tool — sending a targeted message with `@model <msg>` covers the same use cases; models that hit max turns now stop cleanly instead of blocking
+- Remove `cost/` submodule and `agent-tester costs` CLI command — token-level usage is now tracked directly in providers and shown in `/report`
+- Remove undocumented `agent-tester query` CLI command and `vllm.query` — superseded by the REPL; `check_connection` retained for endpoint health checks
+- Remove private helper re-exports (`_to_anthropic_messages`, `_to_anthropic_tools`) from `providers/__init__.py`
+- Update README to reflect current REPL slash commands, sessions format, tool use paths, and cleanup behavior
+
 ## v1.2.1 — 2026-05-19
 - `/report` now shows input/output token counts per model (e.g. `tokens: 1,234 in / 567 out`) when tokens were used via the streaming path
 - All three providers (`AnthropicProvider`, `OpenAICompatProvider`, `BedrockProvider`) now return `input_tokens` and `output_tokens` in `async_stream_raw` results; `Model` accumulates totals across turns
