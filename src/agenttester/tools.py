@@ -219,6 +219,11 @@ class ToolExecutor:
         if not self._branch_created:
             self._branch_slug = slug
 
+    def mark_branch_ready(self, slug: str) -> None:
+        """Mark an existing branch as active — prevents re-creation on first commit."""
+        self._branch_slug = slug
+        self._branch_created = True
+
     def set_event_handler(self, handler: Callable[[str, str], None] | None) -> None:
         """Replace the event handler used for observability callbacks."""
         self._on_event = handler

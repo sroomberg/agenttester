@@ -12,9 +12,11 @@ import yaml
 from .presets import PRESETS
 from .providers import (
     AnthropicProvider,
+    AzureProvider,
     BedrockProvider,
     OpenAICompatProvider,
     Provider,
+    VertexProvider,
 )
 
 CONFIG_CANDIDATES = [
@@ -218,6 +220,28 @@ def _build_named_provider(name: str, data: dict) -> Provider:
         return OpenAICompatProvider(
             endpoint="https://models.inference.ai.azure.com",
             api_key_env=data.get("api_key_env", "GITHUB_TOKEN"),
+        )
+    if ptype == "azure":
+        endpoint = data.get("endpoint")
+        if not endpoint:
+            raise ValueError(
+                f"Provider '{name}' with type 'azure' requires an 'endpoint'"
+            )
+        return AzureProvider(
+            endpoint=endpoint,
+            api_key_env=data.get("api_key_env"),
+            auth_method=data.get("auth_method", "api_key"),
+        )
+    if ptype == "vertex":
+        endpoint = data.get("endpoint")
+        if not endpoint:
+            raise ValueError(
+                f"Provider '{name}' with type 'vertex' requires an 'endpoint'"
+            )
+        return VertexProvider(
+            endpoint=endpoint,
+            api_key_env=data.get("api_key_env"),
+            auth_method=data.get("auth_method", "api_key"),
         )
     raise ValueError(f"Unknown provider type {ptype!r} for provider '{name}'")
 

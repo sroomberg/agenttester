@@ -156,33 +156,70 @@ Define a `providers` block to share credentials across multiple evaluators or RE
 
 | `type` | Description | Install |
 |--------|-------------|---------|
-| `openai` | Any OpenAI-compatible endpoint (Azure AI Foundry, GCP Vertex, vLLM, etc.) | built-in |
+| `openai` | Any OpenAI-compatible endpoint (vLLM, etc.) | built-in |
 | `anthropic` | Direct Anthropic Messages API | built-in |
+| `azure` | Azure AI Foundry / Azure OpenAI Service | built-in |
+| `vertex` | GCP Vertex AI (OpenAI-compatible endpoint) | built-in |
 | `bedrock` | AWS Bedrock Converse API via boto3 | `pip install agenttester[aws]` |
 
-**OpenAI-compatible providers** (Azure, Vertex, etc.)
+**Azure AI Foundry**
+
+Two auth modes:
+
+- `auth_method: api_key` (default) — reads `api_key_env` and sends it as an `api-key` header (Azure's key-based scheme).
+- `auth_method: cli` — runs `az account get-access-token` to obtain an Entra ID Bearer token. Requires the Azure CLI and `az login`.
 
 ```yaml
 providers:
-  azure:
-    type: openai
+  my-azure:
+    type: azure
     endpoint: https://my-resource.openai.azure.com
-    api_key_env: AZURE_OPENAI_KEY     # env var holding the API key
-
-  vertex:
-    type: openai
-    endpoint: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/endpoints/openapi
-    api_key_env: VERTEX_AI_KEY
+    auth_method: api_key        # or "cli"
+    api_key_env: AZURE_OPENAI_KEY
 
 evaluators:
   - name: gpt-4o
-    provider: azure           # inherits endpoint + api_key_env
+    provider: my-azure
     model: gpt-4o
+```
 
+**GCP Vertex AI**
+
+Two auth modes:
+
+- `auth_method: api_key` (default) — reads `api_key_env` and sends it as a standard `Authorization: Bearer` header.
+- `auth_method: cli` — runs `gcloud auth print-access-token`. Requires the Google Cloud SDK and `gcloud auth login`.
+
+```yaml
+providers:
+  my-vertex:
+    type: vertex
+    endpoint: https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/endpoints/openapi
+    auth_method: cli            # or "api_key"
+    api_key_env: VERTEX_TOKEN   # only needed for auth_method: api_key
+
+evaluators:
   - name: gemini
-    provider: vertex
+    provider: my-vertex
     model: google/gemini-2.0-flash-001
-    api_key_env: CUSTOM_KEY   # model-level override of api_key_env
+```
+
+CLI tokens (Azure and Vertex) are cached for 55 minutes to avoid extra subprocesses on every request.
+
+**OpenAI-compatible providers** (generic)
+
+```yaml
+providers:
+  my-openai:
+    type: openai
+    endpoint: http://localhost:8004
+    api_key_env: MY_KEY
+
+evaluators:
+  - name: llama3
+    provider: my-openai
+    model: meta-llama/Meta-Llama-3-70B-Instruct
+    api_key_env: CUSTOM_KEY   # model-level override
 ```
 
 **AWS Bedrock**
@@ -279,6 +316,8 @@ Prompt history is persisted across invocations in `~/.config/agenttester/repl_hi
 |---------|-------------|
 | `/reset` | Clear conversation history for all models |
 | `/status` | Show which models are running or idle |
+| `/stop [@model …]` | Cancel a running model. Without a tag, stops all busy models. |
+| `/interrupt [@model …] <message>` | Cancel a running model and immediately re-dispatch with `<message>`. Without a tag, interrupts all busy models. |
 | `/report` | Show each model's git commits, diff stats, and token usage |
 | `/evaluate [m1,m2,…]` | Cross-evaluate: each model reviews the others' work. Optionally pass a comma-separated list to limit which models act as reviewers. Evaluation documents are saved as Markdown to `.agenttester/evaluations/<session>/`. |
 | `/iterate <prompt>` | After `/evaluate`, inject each model's peer evaluations as context and send an iteration prompt. Shows a per-model plan and requires `y` confirmation before sending. |
@@ -339,7 +378,11 @@ agenttester/<model-name>/<8-char-session>-<feature-name>
 ```
 
 The branch is created lazily on the first write and reused for all subsequent prompts in
-the same session.
+the same session. On session resume, previously negotiated branch names are restored from
+the session record so models continue on the same branches without re-negotiating.
+
+If a model hits its output token limit mid-generation, the loop automatically sends
+`"Continue from where you left off."` and appends the continuation to the same response.
 
 Use `--pem <path>` to authenticate git operations over SSH. Combine flags for a full
 multi-model coding workflow:

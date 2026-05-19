@@ -174,3 +174,57 @@ class TestMaxTurns:
         )
         last = messages[-1]
         assert last["role"] == "tool"
+
+
+# ---------------------------------------------------------------------------
+# max_tokens auto-continue
+# ---------------------------------------------------------------------------
+
+
+class TestMaxTokensAutoContinue:
+    async def test_continues_after_max_tokens(self) -> None:
+        truncated = {
+            "content": "partial answer",
+            "tool_calls": None,
+            "stop_reason": "max_tokens",
+        }
+        final = {"content": "and the rest", "tool_calls": None}
+        provider = _make_provider([truncated, final])
+        result = await run_agent_loop(provider, "m", [], "q", _make_executor())
+        assert result == "and the rest"
+
+    async def test_continue_appends_continue_message(self) -> None:
+        truncated = {
+            "content": "part1",
+            "tool_calls": None,
+            "stop_reason": "max_tokens",
+        }
+        final = {"content": "part2", "tool_calls": None}
+        provider = _make_provider([truncated, final])
+        messages: list[dict] = []
+        await run_agent_loop(provider, "m", messages, "q", _make_executor())
+        roles = [m["role"] for m in messages]
+        assert roles == ["user", "assistant", "user", "assistant"]
+        assert messages[2]["content"] == "Continue from where you left off."
+
+    async def test_on_event_status_emitted_on_continue(self) -> None:
+        truncated = {
+            "content": "part",
+            "tool_calls": None,
+            "stop_reason": "max_tokens",
+        }
+        final = {"content": "done", "tool_calls": None}
+        provider = _make_provider([truncated, final])
+        events: list[tuple] = []
+
+        def _on(k: str, v: str) -> None:
+            events.append((k, v))
+
+        await run_agent_loop(provider, "m", [], "q", _make_executor(), on_event=_on)
+        assert any(k == "status" and "truncated" in v for k, v in events)
+
+    async def test_no_continue_when_empty_content(self) -> None:
+        truncated = {"content": "", "tool_calls": None, "stop_reason": "max_tokens"}
+        provider = _make_provider([truncated])
+        result = await run_agent_loop(provider, "m", [], "q", _make_executor())
+        assert result == ""
