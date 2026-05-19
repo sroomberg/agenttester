@@ -420,6 +420,7 @@ def _collect_work_report(workdir: str) -> dict[str, str]:
             cmd, cwd=workdir, capture_output=True, text=True
         ).stdout.strip()
 
+    _run(["git", "fetch", "origin"])
     commits = _run(["git", "log", "--oneline", "FETCH_HEAD..HEAD"])
     diff = _run(["git", "diff", "FETCH_HEAD...HEAD"])
     if not diff:
