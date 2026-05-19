@@ -73,6 +73,13 @@ class GitManager:
 
         repo.git.update_environment(**env)
 
+    def remote_url(self, remote: str = _DEFAULT_REMOTE) -> str:
+        """Return the URL of *remote*, falling back to a file URI."""
+        try:
+            return self.repo.remote(remote).url
+        except Exception:
+            return self.repo_path.as_uri()
+
     def has_commits(self) -> bool:
         """Check if the repo has at least one commit."""
         try:

@@ -19,6 +19,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 
+from .branch_manifest import record_branch
 from .config import (
     GLOBAL_CONFIG_DIR,
     _build_named_provider,
@@ -993,10 +994,15 @@ async def run_repl(
                         prompt_text[:_BRANCH_SLUG_MAX_LEN]
                     )
                 _session_branch_slug = f"{short_session}-{feature_slug}"
+                _remote_url = (
+                    git_mgr.remote_url() if git_mgr is not None else ""
+                )
                 for m in models.values():
                     b = branch_name(m.name, _session_branch_slug)
                     if b not in session.branches:
                         session.branches.append(b)
+                        if _remote_url:
+                            record_branch(b, _remote_url, session_name)
 
             for m in target_models.values():
                 if m.tool_executor is not None:

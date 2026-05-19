@@ -11,6 +11,7 @@ from prompt_toolkit.shortcuts import (
 )
 from rich.console import Console
 
+from .branch_manifest import remove_branch
 from .git_manager import GitManager
 from .session import ReplSession
 
@@ -147,6 +148,7 @@ def run_cleanup(workdir: Path, remote: str = "origin") -> None:
             ok = git_mgr.delete_remote_branch(branch, remote)
             icon = "[green]✓[/green]" if ok else "[yellow]~[/yellow]"
             console.print(f"  {icon} remote  {branch}")
+        remove_branch(branch)
 
     # ── Optionally delete session records for fully-deleted sessions ──────────
     fully_deleted_sessions = [

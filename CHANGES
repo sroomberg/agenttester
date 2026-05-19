@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.6 — 2026-05-19
+- Add branch manifest (`~/.config/agenttester/branches.json`): records every branch with its remote URI and session ID when created; entries are removed when branches are deleted via cleanup
+
 ## v1.1.5 — 2026-05-19
 - Cleanup now prompts to delete session records (history, reports, eval results) only after an explicit "delete entirely" selection, with a separate yes/no confirmation; records are preserved by default
 
