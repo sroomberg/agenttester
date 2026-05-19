@@ -147,6 +147,8 @@ class AnthropicProvider(Provider):
         blocks: dict[int, dict] = {}
         text_parts: list[str] = []
         tool_calls: list[dict] = []
+        input_tokens = 0
+        output_tokens = 0
 
         async with (
             aiohttp.ClientSession(timeout=_API_STREAM_TIMEOUT) as session,
@@ -182,7 +184,15 @@ class AnthropicProvider(Provider):
 
                 event_type = data.get("type", "")
 
-                if event_type == "content_block_start":
+                if event_type == "message_start":
+                    usage = data.get("message", {}).get("usage", {})
+                    input_tokens += usage.get("input_tokens", 0)
+
+                elif event_type == "message_delta":
+                    usage = data.get("usage", {})
+                    output_tokens += usage.get("output_tokens", 0)
+
+                elif event_type == "content_block_start":
                     idx = data.get("index", 0)
                     block = data.get("content_block", {})
                     blocks[idx] = {
@@ -223,4 +233,6 @@ class AnthropicProvider(Provider):
         return {
             "content": text if text else None,
             "tool_calls": tool_calls if tool_calls else None,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
         }

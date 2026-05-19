@@ -62,12 +62,15 @@ class OpenAICompatProvider(Provider):
             "messages": messages,
             "max_tokens": max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             body["tools"] = tools
 
         text_parts: list[str] = []
         tool_calls_acc: dict[int, dict] = {}
+        input_tokens = 0
+        output_tokens = 0
 
         async with (
             aiohttp.ClientSession(timeout=_API_STREAM_TIMEOUT) as session,
@@ -99,6 +102,10 @@ class OpenAICompatProvider(Provider):
                         continue
                 else:
                     buffer = ""
+                usage = data.get("usage")
+                if usage:
+                    input_tokens += usage.get("prompt_tokens", 0)
+                    output_tokens += usage.get("completion_tokens", 0)
                 choices = data.get("choices")
                 if not choices:
                     continue
@@ -131,4 +138,9 @@ class OpenAICompatProvider(Provider):
             if tool_calls_acc
             else None
         )
-        return {"content": text or None, "tool_calls": tool_calls}
+        return {
+            "content": text or None,
+            "tool_calls": tool_calls,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }

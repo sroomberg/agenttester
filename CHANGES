@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.2.1 — 2026-05-19
+- `/report` now shows input/output token counts per model (e.g. `tokens: 1,234 in / 567 out`) when tokens were used via the streaming path
+- All three providers (`AnthropicProvider`, `OpenAICompatProvider`, `BedrockProvider`) now return `input_tokens` and `output_tokens` in `async_stream_raw` results; `Model` accumulates totals across turns
+
 ## v1.2.0 — 2026-05-19
 - `/evaluate` now accepts an optional comma-separated reviewer list (e.g., `/evaluate claude,gpt4`) to limit which models act as reviewers
 - Evaluation documents are saved as Markdown files to `<repo>/.agenttester/evaluations/<session_slug>/` (filenames: `<reviewed>-by-<reviewer>.md`) and review prompts now request Markdown-formatted output

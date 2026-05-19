@@ -105,6 +105,8 @@ class Model:
     messages: list[dict] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
     event_logger: EventLogger | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     def setup_executor(
         self,
@@ -278,6 +280,8 @@ async def _query_async(
                 model.model_id, model.messages, model.max_tokens, on_chunk=_on_chunk
             )
             reply = result.get("content") or "".join(parts)
+            model.input_tokens += result.get("input_tokens", 0)
+            model.output_tokens += result.get("output_tokens", 0)
         except Exception as e:
             model.pop_message()
             return f"[error] {e}"
@@ -469,6 +473,11 @@ async def _run_report(
                 console.print(f"  [dim]{line}[/dim]")
         if report["stat"]:
             console.print(f"  {report['stat']}")
+        m = models.get(name)
+        if m and (m.input_tokens or m.output_tokens):
+            console.print(
+                f"  [dim]tokens: {m.input_tokens:,} in / {m.output_tokens:,} out[/dim]"
+            )
         console.print()
 
 
@@ -568,19 +577,26 @@ async def _run_evaluate(
 
         async def _review(
             reviewer_name: str, reviewer: Model, prompt: str = review_prompt
-        ) -> tuple[str, str]:
+        ) -> tuple[str, str, int, int]:
             try:
                 result = await reviewer.provider.async_stream_raw(
                     reviewer.model_id,
                     [{"role": "user", "content": prompt}],
                     reviewer.max_tokens,
                 )
-                return reviewer_name, result.get("content") or "[no response]"
+                return (
+                    reviewer_name,
+                    result.get("content") or "[no response]",
+                    result.get("input_tokens", 0),
+                    result.get("output_tokens", 0),
+                )
             except Exception as exc:
-                return reviewer_name, f"[error: {exc}]"
+                return reviewer_name, f"[error: {exc}]", 0, 0
 
         for coro in asyncio.as_completed([_review(n, m) for n, m in pending]):
-            reviewer_name, text = await coro
+            reviewer_name, text, in_tok, out_tok = await coro
+            models[reviewer_name].input_tokens += in_tok
+            models[reviewer_name].output_tokens += out_tok
             console.print(
                 f"[bold]{reviewer_name}[/bold] reviews [bold]{reviewed_name}[/bold]:"
             )

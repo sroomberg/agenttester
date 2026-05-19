@@ -51,6 +51,40 @@ def _mock_aiohttp_json(response_json: dict):
     return MagicMock(return_value=mock_session), mock_session
 
 
+def _mock_sse_response(events: list[dict]):
+    """Create a mock aiohttp session that streams SSE events from *events*."""
+    import json
+
+    lines: list[bytes] = []
+    for event in events:
+        lines.append(f"data: {json.dumps(event)}\n".encode())
+    lines.append(b"")  # signals EOF
+
+    idx = [0]
+
+    async def _readline() -> bytes:
+        if idx[0] < len(lines):
+            line = lines[idx[0]]
+            idx[0] += 1
+            return line
+        return b""
+
+    mock_content = MagicMock()
+    mock_content.readline = _readline
+
+    mock_resp = MagicMock()
+    mock_resp.content = mock_content
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = MagicMock()
+    mock_session.post.return_value = mock_resp
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    return MagicMock(return_value=mock_session)
+
+
 # ---------------------------------------------------------------------------
 # Provider ABC
 # ---------------------------------------------------------------------------
@@ -429,3 +463,186 @@ class TestBedrockProvider:
                 "model", [{"role": "user", "content": "hi"}], 100
             )
         assert result == "async reply"
+
+
+# ---------------------------------------------------------------------------
+# Token usage in async_stream_raw
+# ---------------------------------------------------------------------------
+
+
+class TestAnthropicStreamUsage:
+    async def test_returns_input_and_output_tokens(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        events = [
+            {"type": "message_start", "message": {"usage": {"input_tokens": 120}}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text"},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "hello"},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 45},
+            },
+        ]
+        mock_cls = _mock_sse_response(events)
+        with patch("aiohttp.ClientSession", mock_cls):
+            result = await AnthropicProvider().async_stream_raw(
+                "claude-opus-4-7", [{"role": "user", "content": "hi"}], 256
+            )
+        assert result["input_tokens"] == 120
+        assert result["output_tokens"] == 45
+
+    async def test_zero_when_no_usage_events(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        events = [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text"},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "hi"},
+            },
+        ]
+        mock_cls = _mock_sse_response(events)
+        with patch("aiohttp.ClientSession", mock_cls):
+            result = await AnthropicProvider().async_stream_raw(
+                "model", [{"role": "user", "content": "hi"}], 100
+            )
+        assert result["input_tokens"] == 0
+        assert result["output_tokens"] == 0
+
+
+class TestOpenAICompatStreamUsage:
+    async def test_returns_input_and_output_tokens(self) -> None:
+        events = [
+            {"choices": [{"delta": {"content": "hello"}}]},
+            {
+                "choices": [],
+                "usage": {"prompt_tokens": 80, "completion_tokens": 30},
+            },
+        ]
+        mock_cls = _mock_sse_response(events)
+        with patch("aiohttp.ClientSession", mock_cls):
+            result = await OpenAICompatProvider("http://h:8001").async_stream_raw(
+                "llama", [{"role": "user", "content": "hi"}], 128
+            )
+        assert result["input_tokens"] == 80
+        assert result["output_tokens"] == 30
+
+    async def test_requests_include_usage_stream_option(self) -> None:
+        events = [{"choices": [{"delta": {"content": "ok"}}]}]
+        mock_cls = _mock_sse_response(events)
+        with patch("aiohttp.ClientSession", mock_cls) as mock_session_factory:
+            await OpenAICompatProvider("http://h:8001").async_stream_raw(
+                "llama", [], 100
+            )
+        session = mock_session_factory.return_value.__aenter__.return_value
+        body = session.post.call_args.kwargs["json"]
+        assert body.get("stream_options") == {"include_usage": True}
+
+    async def test_zero_when_no_usage_in_stream(self) -> None:
+        events = [{"choices": [{"delta": {"content": "hello"}}]}]
+        mock_cls = _mock_sse_response(events)
+        with patch("aiohttp.ClientSession", mock_cls):
+            result = await OpenAICompatProvider("http://h:8001").async_stream_raw(
+                "llama", [], 100
+            )
+        assert result["input_tokens"] == 0
+        assert result["output_tokens"] == 0
+
+
+class TestBedrockStreamUsage:
+    def test_returns_input_and_output_tokens(self) -> None:
+        mock_client = MagicMock()
+        mock_client.converse_stream.return_value = {
+            "stream": [
+                {
+                    "contentBlockDelta": {
+                        "delta": {"text": "hello"},
+                        "contentBlockIndex": 0,
+                    }
+                },
+                {
+                    "metadata": {
+                        "usage": {"inputTokens": 200, "outputTokens": 75}
+                    }
+                },
+            ]
+        }
+        with _boto3_mock(mock_client):
+            result = BedrockProvider()._stream_raw_sync(
+                "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                [{"role": "user", "content": "hi"}],
+                256,
+            )
+        assert result["input_tokens"] == 200
+        assert result["output_tokens"] == 75
+
+    def test_zero_when_no_metadata_event(self) -> None:
+        mock_client = MagicMock()
+        mock_client.converse_stream.return_value = {
+            "stream": [
+                {
+                    "contentBlockDelta": {
+                        "delta": {"text": "hi"},
+                        "contentBlockIndex": 0,
+                    }
+                },
+            ]
+        }
+        with _boto3_mock(mock_client):
+            result = BedrockProvider()._stream_raw_sync("model", [], 100)
+        assert result["input_tokens"] == 0
+        assert result["output_tokens"] == 0
+
+
+class TestModelTokenAccumulation:
+    async def test_query_async_accumulates_tokens(self) -> None:
+        from agenttester.repl import Model, _query_async
+
+        provider = MagicMock(spec=OpenAICompatProvider)
+        provider.async_stream_raw = AsyncMock(
+            return_value={
+                "content": "ok",
+                "tool_calls": None,
+                "input_tokens": 50,
+                "output_tokens": 20,
+            }
+        )
+        model = Model(name="m", model_id="llama", provider=provider)
+        await _query_async(model, "hello")
+        assert model.input_tokens == 50
+        assert model.output_tokens == 20
+
+    async def test_query_async_accumulates_across_turns(self) -> None:
+        from agenttester.repl import Model, _query_async
+
+        provider = MagicMock(spec=OpenAICompatProvider)
+        provider.async_stream_raw = AsyncMock(
+            return_value={
+                "content": "ok",
+                "tool_calls": None,
+                "input_tokens": 30,
+                "output_tokens": 10,
+            }
+        )
+        model = Model(name="m", model_id="llama", provider=provider)
+        await _query_async(model, "first")
+        await _query_async(model, "second")
+        assert model.input_tokens == 60
+        assert model.output_tokens == 20
