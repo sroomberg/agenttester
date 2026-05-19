@@ -151,9 +151,7 @@ def run_cleanup(workdir: Path, remote: str = "origin") -> None:
         remove_branch(branch)
 
     # ── Optionally delete session records for fully-deleted sessions ──────────
-    fully_deleted_sessions = [
-        s for s in sessions_to_show if s.id in full_delete_ids
-    ]
+    fully_deleted_sessions = [s for s in sessions_to_show if s.id in full_delete_ids]
     if fully_deleted_sessions:
         console.print()
         delete_records: bool = yes_no_dialog(

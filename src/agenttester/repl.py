@@ -994,9 +994,7 @@ async def run_repl(
                         prompt_text[:_BRANCH_SLUG_MAX_LEN]
                     )
                 _session_branch_slug = f"{short_session}-{feature_slug}"
-                _remote_url = (
-                    git_mgr.remote_url() if git_mgr is not None else ""
-                )
+                _remote_url = git_mgr.remote_url() if git_mgr is not None else ""
                 for m in models.values():
                     b = branch_name(m.name, _session_branch_slug)
                     if b not in session.branches:
