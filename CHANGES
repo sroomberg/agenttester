@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.2 — 2026-05-19
+- Update `testing.md` skill: agents must write tests for new code, match existing conventions, test observable behaviour not internals, one behaviour per test
+
 ## v1.1.1 — 2026-05-19
 - Add tests for `type: github` provider (default `GITHUB_TOKEN` and custom `api_key_env`)
 
