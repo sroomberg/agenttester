@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from .anthropic import AnthropicProvider
+from .aws import BedrockProvider
 from .azure import AzureProvider
 from .base import Provider
-from .bedrock import BedrockProvider
+from .gcp import VertexProvider
 from .openai_compat import OpenAICompatProvider
-from .vertex import VertexProvider
 
 __all__ = [
     "AnthropicProvider",

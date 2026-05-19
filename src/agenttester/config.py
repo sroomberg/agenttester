@@ -215,6 +215,8 @@ def _build_named_provider(name: str, data: dict) -> Provider:
             aws_access_key_id_env=data.get("aws_access_key_id_env"),
             aws_secret_access_key_env=data.get("aws_secret_access_key_env"),
             aws_session_token_env=data.get("aws_session_token_env"),
+            auth_method=data.get("auth_method", "default"),
+            api_key_env=data.get("api_key_env"),
         )
     if ptype == "github":
         return OpenAICompatProvider(

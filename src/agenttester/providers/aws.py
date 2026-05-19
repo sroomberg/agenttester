@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 
 from .base import Provider
@@ -87,17 +89,34 @@ def _to_bedrock_messages(messages: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 class BedrockProvider(Provider):
-    """Calls AWS Bedrock via the Converse API using boto3.
+    """Calls AWS Bedrock via the Converse API.
 
-    Requires ``pip install agenttester[aws]``.
+    Three auth modes are supported:
 
-    Authentication priority (first configured wins):
-    1. *aws_profile* — uses a named ``~/.aws/config`` profile (SSO, assumed
-       roles, etc.)
-    2. *aws_access_key_id_env* / *aws_secret_access_key_env* — reads explicit
-       credentials from environment variables.
-    3. Default boto3 credential chain (env vars, ``~/.aws/credentials``, IAM
-       instance role, etc.).
+    ``auth_method='default'`` (default): boto3 credential chain (env vars,
+    ``~/.aws/credentials``, IAM instance role, etc.). Requires
+    ``pip install agenttester[aws]``.
+
+    ``auth_method='profile'``: uses *aws_profile* — a named
+    ``~/.aws/config`` entry (SSO, assumed roles, etc.). Requires
+    ``pip install agenttester[aws]``.
+
+    ``auth_method='keys'``: reads explicit credentials from
+    *aws_access_key_id_env* / *aws_secret_access_key_env*. Requires
+    ``pip install agenttester[aws]``.
+
+    ``auth_method='api_key'``: reads *api_key_env* and sends it as an
+    ``Authorization: Bearer`` token via direct HTTP (no boto3 required).
+    Use this with AWS Bedrock API keys or Bedrock-compatible HTTP proxies.
+
+    Config example::
+
+        providers:
+          my-bedrock:
+            type: bedrock
+            region: us-east-1
+            auth_method: api_key
+            api_key_env: BEDROCK_API_KEY
     """
 
     def __init__(
@@ -107,12 +126,16 @@ class BedrockProvider(Provider):
         aws_access_key_id_env: str | None = None,
         aws_secret_access_key_env: str | None = None,
         aws_session_token_env: str | None = None,
+        auth_method: str = "default",
+        api_key_env: str | None = None,
     ) -> None:
         self.region = region
         self.aws_profile = aws_profile
         self.aws_access_key_id_env = aws_access_key_id_env
         self.aws_secret_access_key_env = aws_secret_access_key_env
         self.aws_session_token_env = aws_session_token_env
+        self._auth_method = auth_method
+        self.api_key_env = api_key_env
 
     def _make_client(self, timeout: int = 300):
         try:
@@ -129,11 +152,11 @@ class BedrockProvider(Provider):
             retries={"max_attempts": 2},
         )
 
-        if self.aws_profile:
+        if self._auth_method == "profile" or self.aws_profile:
             session = boto3.Session(profile_name=self.aws_profile)
-        elif self.aws_access_key_id_env:
+        elif self._auth_method == "keys" or self.aws_access_key_id_env:
             session = boto3.Session(
-                aws_access_key_id=os.environ.get(self.aws_access_key_id_env),
+                aws_access_key_id=os.environ.get(self.aws_access_key_id_env or ""),
                 aws_secret_access_key=os.environ.get(
                     self.aws_secret_access_key_env or "", ""
                 ),
@@ -146,6 +169,73 @@ class BedrockProvider(Provider):
 
         return session.client("bedrock-runtime", region_name=self.region, config=config)
 
+    def _call_api_key_sync(
+        self,
+        model: str,
+        messages: list[dict],
+        max_tokens: int,
+        tools: list[dict] | None = None,
+    ) -> dict:
+        """Call the Bedrock Converse endpoint directly with a Bearer token."""
+        system, converse_messages = _to_bedrock_messages(messages)
+        body: dict = {
+            "messages": converse_messages,
+            "inferenceConfig": {"maxTokens": max_tokens},
+        }
+        if system:
+            body["system"] = system
+        if tools:
+            body["toolConfig"] = {"tools": _to_bedrock_tools(tools)}
+
+        api_key = os.environ.get(self.api_key_env, "") if self.api_key_env else ""
+        endpoint = (
+            f"https://bedrock-runtime.{self.region}.amazonaws.com"
+            f"/model/{model}/converse"
+        )
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(body).encode(),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(
+                f"Bedrock API key request failed ({exc.code}): "
+                f"{exc.read().decode()[:200]}"
+            ) from exc
+
+        content = data.get("output", {}).get("message", {}).get("content", [])
+        text_parts: list[str] = []
+        tool_calls: list[dict] = []
+        for item in content:
+            if "text" in item:
+                text_parts.append(item["text"])
+            elif "toolUse" in item:
+                tool_calls.append(
+                    {
+                        "id": item["toolUse"]["toolUseId"],
+                        "function": {
+                            "name": item["toolUse"]["name"],
+                            "arguments": json.dumps(item["toolUse"]["input"]),
+                        },
+                    }
+                )
+        usage = data.get("usage", {})
+        text = "".join(text_parts)
+        return {
+            "content": text if text else None,
+            "tool_calls": tool_calls if tool_calls else None,
+            "input_tokens": usage.get("inputTokens", 0),
+            "output_tokens": usage.get("outputTokens", 0),
+            "stop_reason": data.get("stopReason", ""),
+        }
+
     def call(
         self,
         model: str,
@@ -153,6 +243,9 @@ class BedrockProvider(Provider):
         max_tokens: int,
         timeout: int = 120,
     ) -> str:
+        if self._auth_method == "api_key":
+            result = self._call_api_key_sync(model, messages, max_tokens)
+            return result.get("content") or ""
         client = self._make_client(timeout)
 
         system = [{"text": m["content"]} for m in messages if m["role"] == "system"]
@@ -262,7 +355,11 @@ class BedrockProvider(Provider):
         tools: list[dict] | None = None,
         on_chunk: Callable[[str], None] | None = None,
     ) -> dict:
-        """Async streaming via Bedrock ConverseStream (runs sync in thread)."""
+        """Async via Bedrock ConverseStream (boto3) or direct HTTP (api_key)."""
+        if self._auth_method == "api_key":
+            return await asyncio.to_thread(
+                self._call_api_key_sync, model, messages, max_tokens, tools
+            )
         return await asyncio.to_thread(
             self._stream_raw_sync, model, messages, max_tokens, tools, on_chunk
         )
