@@ -26,6 +26,18 @@ def _mock_dialog(return_value):
     return m
 
 
+def _mock_yes_no_sequence(return_values: list[bool]):
+    """Return a yes_no_dialog side_effect that yields successive bool values."""
+    it = iter(return_values)
+
+    def _side_effect(*_a, **_kw):
+        m = MagicMock()
+        m.run.return_value = next(it)
+        return m
+
+    return _side_effect
+
+
 def _mock_git_mgr(local_branches: list[str]):
     mgr = MagicMock()
     mgr.list_agenttester_branches.return_value = local_branches
@@ -220,6 +232,83 @@ class TestFullSessionDeletion:
         ):
             run_cleanup(tmp_path)
         mgr.delete_local_branch.assert_called_once_with("agenttester/m/abc-feat")
+
+    def test_session_record_deleted_when_approved(self, tmp_path: Path) -> None:
+        branch = "agenttester/m/abc-feat"
+        session = _make_session("s1", [branch])
+        mgr = _mock_git_mgr([branch])
+        with (
+            patch("agenttester.cleanup.ReplSession.list_all", return_value=[session]),
+            patch("agenttester.cleanup.GitManager", return_value=mgr),
+            patch("agenttester.cleanup.checkboxlist_dialog", _mock_dialog(["s1"])),
+            patch("agenttester.cleanup.radiolist_dialog", _mock_dialog("local")),
+            patch(
+                "agenttester.cleanup.yes_no_dialog",
+                side_effect=_mock_yes_no_sequence([True, True]),
+            ),
+            patch.object(session, "delete") as mock_delete,
+        ):
+            run_cleanup(tmp_path)
+        mock_delete.assert_called_once()
+
+    def test_session_record_kept_when_declined(self, tmp_path: Path) -> None:
+        branch = "agenttester/m/abc-feat"
+        session = _make_session("s1", [branch])
+        mgr = _mock_git_mgr([branch])
+        with (
+            patch("agenttester.cleanup.ReplSession.list_all", return_value=[session]),
+            patch("agenttester.cleanup.GitManager", return_value=mgr),
+            patch("agenttester.cleanup.checkboxlist_dialog", _mock_dialog(["s1"])),
+            patch("agenttester.cleanup.radiolist_dialog", _mock_dialog("local")),
+            patch(
+                "agenttester.cleanup.yes_no_dialog",
+                side_effect=_mock_yes_no_sequence([True, False]),
+            ),
+            patch.object(session, "delete") as mock_delete,
+        ):
+            run_cleanup(tmp_path)
+        mock_delete.assert_not_called()
+
+    def test_session_record_prompt_not_shown_for_individual_only_deletion(
+        self, tmp_path: Path
+    ) -> None:
+        b1 = "agenttester/m/abc-feat"
+        b2 = "agenttester/m/def-feat"
+        session = _make_session("s1", [b1, b2])
+        mgr = _mock_git_mgr([b1, b2])
+        yes_no_call_count = 0
+
+        def count_yes_no(*_a, **_kw):
+            nonlocal yes_no_call_count
+            yes_no_call_count += 1
+            m = MagicMock()
+            m.run.return_value = True
+            return m
+
+        call_count = 0
+
+        def checkboxlist_side(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            # phase 1: no full deletes; phase 2: select just one branch
+            value = [] if call_count == 1 else [b1]
+            m = MagicMock()
+            m.run.return_value = value
+            return m
+
+        with (
+            patch("agenttester.cleanup.ReplSession.list_all", return_value=[session]),
+            patch("agenttester.cleanup.GitManager", return_value=mgr),
+            patch(
+                "agenttester.cleanup.checkboxlist_dialog", side_effect=checkboxlist_side
+            ),
+            patch("agenttester.cleanup.radiolist_dialog", _mock_dialog("local")),
+            patch("agenttester.cleanup.yes_no_dialog", side_effect=count_yes_no),
+        ):
+            run_cleanup(tmp_path)
+
+        # Only one yes_no call (branch confirm) — no session record prompt
+        assert yes_no_call_count == 1
 
 
 # ---------------------------------------------------------------------------

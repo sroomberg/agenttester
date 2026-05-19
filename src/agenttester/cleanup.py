@@ -148,4 +148,23 @@ def run_cleanup(workdir: Path, remote: str = "origin") -> None:
             icon = "[green]✓[/green]" if ok else "[yellow]~[/yellow]"
             console.print(f"  {icon} remote  {branch}")
 
+    # ── Optionally delete session records for fully-deleted sessions ──────────
+    fully_deleted_sessions = [
+        s for s in sessions_to_show if s.id in full_delete_ids
+    ]
+    if fully_deleted_sessions:
+        console.print()
+        delete_records: bool = yes_no_dialog(
+            title="Delete session records?",
+            text=(
+                f"Also delete the {len(fully_deleted_sessions)} session record(s)"
+                " (conversation history, reports, eval results)?\n\n"
+                "Choose 'No' to keep them for reference."
+            ),
+        ).run()
+        if delete_records:
+            for s in fully_deleted_sessions:
+                s.delete()
+                console.print(f"  [green]✓[/green] session  {s.id}")
+
     console.print("\n[green]Done.[/green]")
