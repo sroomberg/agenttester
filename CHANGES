@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.3 — 2026-05-18
+- Expand `editing.md` skill: add single-source-of-truth section and things-to-avoid list (magic values, deep nesting, dead code, inappropriate intimacy, speculative generality, god objects)
+
 ## v1.0.2 — 2026-05-18
 - Add `scope.md` skill: stay in scope, minimal diffs, no unrelated edits
 
