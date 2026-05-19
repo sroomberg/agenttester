@@ -404,7 +404,7 @@ def list_sessions(
     all_sessions = ReplSession.list_all()
     if not all_sessions:
         if yaml_output:
-            console.print(yaml.dump([]), end="")
+            print(yaml.dump([]), end="")
         else:
             console.print("[dim]No saved sessions found.[/dim]")
         return
@@ -459,8 +459,10 @@ def list_sessions(
                     ],
                 }
             )
-        rendered = yaml.dump(data, default_flow_style=False, allow_unicode=True)
-        console.print(rendered, end="")
+        rendered = yaml.dump(
+            data, default_flow_style=False, allow_unicode=True, sort_keys=False
+        )
+        print(rendered, end="")
         return
 
     max_branch_len = max(

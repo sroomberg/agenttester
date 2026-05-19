@@ -6,9 +6,11 @@ import re
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import yaml
 from typer.testing import CliRunner
 
 from agenttester.cli import _find_git_root, app
+from agenttester.session import ReplSession
 
 runner = CliRunner()
 
@@ -111,3 +113,87 @@ class TestFindGitRoot:
             pass
         result = _find_git_root(tmp_git_repo)
         assert result == tmp_git_repo
+
+
+class TestSessionsCommand:
+    def _make_sessions(self, sessions_dir: Path) -> None:
+        s1 = ReplSession.create("old-session")
+        s1.created_at = "2026-05-18T09:00:00+00:00"
+        s1.branches = ["agenttester/claude/old-fix"]
+        s1.save(sessions_dir)
+
+        s2 = ReplSession.create("new-session")
+        s2.created_at = "2026-05-19T10:30:00+00:00"
+        s2.branches = ["agenttester/claude/new-feat", "agenttester/gpt4/new-feat"]
+        s2.save(sessions_dir)
+
+    def test_no_sessions(self, tmp_path: Path) -> None:
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions"])
+        assert result.exit_code == 0
+        assert "No saved sessions" in result.output
+
+    def test_lists_sessions_newest_first(self, tmp_path: Path) -> None:
+        self._make_sessions(tmp_path)
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions"])
+        assert result.exit_code == 0
+        out = strip_ansi(result.output)
+        assert out.index("new-session") < out.index("old-session")
+
+    def test_branches_indented(self, tmp_path: Path) -> None:
+        self._make_sessions(tmp_path)
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions"])
+        out = strip_ansi(result.output)
+        branch_lines = [ln for ln in out.splitlines() if "agenttester/" in ln]
+        assert all(ln.startswith("    ") for ln in branch_lines)
+
+    def test_branch_columns_aligned(self, tmp_path: Path) -> None:
+        self._make_sessions(tmp_path)
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions"])
+        out = strip_ansi(result.output)
+        branch_lines = [ln for ln in out.splitlines() if "agenttester/" in ln]
+        status_positions = [ln.index("unknown") for ln in branch_lines]
+        assert len(set(status_positions)) == 1  # all statuses start at same column
+
+    def test_yaml_output_newest_first(self, tmp_path: Path) -> None:
+        self._make_sessions(tmp_path)
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions", "--yaml"])
+        assert result.exit_code == 0
+        data = yaml.safe_load(result.output)
+        assert data[0]["id"] == "new-session"
+        assert data[1]["id"] == "old-session"
+
+    def test_yaml_key_order(self, tmp_path: Path) -> None:
+        self._make_sessions(tmp_path)
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions", "--yaml"])
+        lines = result.output.splitlines()
+
+        def _first_line(key: str) -> int:
+            return next(
+                i
+                for i, ln in enumerate(lines)
+                if ln.lstrip("- ").startswith(f"{key}:")
+            )
+
+        assert _first_line("id") < _first_line("date") < _first_line("start")
+        assert _first_line("start") < _first_line("end") < _first_line("branches")
+
+    def test_yaml_no_sessions(self, tmp_path: Path) -> None:
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions", "--yaml"])
+        assert result.exit_code == 0
+        assert yaml.safe_load(result.output) == []
+
+    def test_yaml_contains_branch_status(self, tmp_path: Path) -> None:
+        self._make_sessions(tmp_path)
+        with patch("agenttester.session._default_sessions_dir", return_value=tmp_path):
+            result = runner.invoke(app, ["sessions", "--yaml"])
+        data = yaml.safe_load(result.output)
+        branch_entry = data[0]["branches"][0]
+        assert "branch" in branch_entry
+        assert "status" in branch_entry

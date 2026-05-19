@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.11 — 2026-05-19
+- Fix `sessions` YAML output: preserve key order (id, date, start, end, branches) via sort_keys=False; use plain print to avoid Rich markup interference
+
 ## v1.1.10 — 2026-05-19
 - Add `agent-tester sessions` command: lists sessions newest-first, each showing `date  start  end  id` with branches indented 4 spaces and labeled `local`, `remote`, `local,remote`, or `unknown`; pass `--yaml` for machine-readable output
 
