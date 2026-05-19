@@ -214,6 +214,11 @@ def _build_named_provider(name: str, data: dict) -> Provider:
             aws_secret_access_key_env=data.get("aws_secret_access_key_env"),
             aws_session_token_env=data.get("aws_session_token_env"),
         )
+    if ptype == "github":
+        return OpenAICompatProvider(
+            endpoint="https://models.inference.ai.azure.com",
+            api_key_env=data.get("api_key_env", "GITHUB_TOKEN"),
+        )
     raise ValueError(f"Unknown provider type {ptype!r} for provider '{name}'")
 
 
