@@ -131,21 +131,19 @@ class GitManager:
         except Exception:
             clone_url = self.repo_path.as_uri()
 
-        if branch:
-            try:
-                self.repo.git.clone(
-                    "--branch",
-                    branch,
-                    "--single-branch",
-                    clone_url,
-                    str(dest),
-                )
-                return dest
-            except GitCommandError:
-                if dest.exists():
-                    shutil.rmtree(dest, ignore_errors=True)
-
         self.repo.git.clone("--depth", "1", clone_url, str(dest))
+
+        if branch:
+            # Shallow clone of the default branch correctly sets origin/HEAD.
+            # Now fetch and check out the agent's branch on top so that
+            # origin/HEAD..HEAD shows the agent's commits, not zero.
+            try:
+                clone_repo = git.Repo(dest)
+                clone_repo.git.fetch("origin", branch)
+                clone_repo.git.checkout("--track", f"origin/{branch}")
+            except GitCommandError:
+                pass
+
         return dest
 
     @staticmethod

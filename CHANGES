@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.8 — 2026-05-18
+- Fix `/report` on resumed sessions when clones are gone: `--single-branch` clone set `origin/HEAD` to the agent's own branch, making `origin/HEAD..HEAD` always empty; now clone with `--depth 1` (correct `origin/HEAD`) then fetch and checkout the agent's branch
+
 ## v1.0.7 — 2026-05-18
 - Bottom toolbar shows `evaluating (N/M)` while `/evaluate` is running
 - `/status` prints a review-progress line during evaluation
