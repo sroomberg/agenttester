@@ -421,11 +421,16 @@ def _collect_work_report(workdir: str) -> dict[str, str]:
         ).stdout.strip()
 
     _run(["git", "fetch", "origin"])
-    commits = _run(["git", "log", "--oneline", "FETCH_HEAD..HEAD"])
-    diff = _run(["git", "diff", "FETCH_HEAD...HEAD"])
+    # Use origin/HEAD (remote default branch) rather than FETCH_HEAD: when
+    # fetching all branches, FETCH_HEAD is set to whichever ref git processes
+    # last (alphabetically agenttester/* precedes main), so it can point to
+    # the agent's own pushed branch, making FETCH_HEAD..HEAD always empty.
+    base = "origin/HEAD"
+    commits = _run(["git", "log", "--oneline", f"{base}..HEAD"])
+    diff = _run(["git", "diff", f"{base}...HEAD"])
     if not diff:
         diff = _run(["git", "diff", "HEAD"])
-    stat = _run(["git", "diff", "--shortstat", "FETCH_HEAD...HEAD"])
+    stat = _run(["git", "diff", "--shortstat", f"{base}...HEAD"])
     if not stat:
         stat = _run(["git", "diff", "--shortstat", "HEAD"])
     return {"commits": commits, "diff": diff, "stat": stat}

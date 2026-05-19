@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.5 — 2026-05-18
+- Fix session resume: reuse existing model clones instead of wiping and re-cloning
+- Fix `/report` always returning empty: compare against `origin/HEAD` (remote default branch) instead of `FETCH_HEAD`, which was being set to the agent's own pushed branch after `git fetch origin`
+
 ## v1.0.4 — 2026-05-18
 - Consolidate config dir: `LocalCostBackend` and `_get_global_skills_dir` now use `GLOBAL_CONFIG_DIR` instead of `~/.agenttester`; `cli.py` `watch` command uses `GLOBAL_CONFIG_DIR / "sessions"` instead of a hardcoded path
 - Fix `_skills_from_configs`: resolve config file within `repo_path` using `CONFIG_CANDIDATES` instead of passing the directory to `get_config_paths`

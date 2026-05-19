@@ -95,10 +95,11 @@ class GitManager:
         return [h.name for h in self.repo.heads if h.name.startswith("agenttester/")]
 
     def clone_for_model(self, model_name: str, session_id: str) -> Path:
-        """Create a fresh shallow clone of this repo in a temp dir for one model.
+        """Return the clone directory for one model, creating it if needed.
 
         Each model gets its own isolated working directory so concurrent agents
-        never read or write each other's files.
+        never read or write each other's files. On session resume the existing
+        clone is reused so agents keep their branch and commit history.
         """
         dest = (
             Path(tempfile.gettempdir())
@@ -107,7 +108,7 @@ class GitManager:
             / _sanitize_ref_component(model_name)
         )
         if dest.exists():
-            shutil.rmtree(dest)
+            return dest
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         # Prefer the remote URL so the clone can push to the real remote.
