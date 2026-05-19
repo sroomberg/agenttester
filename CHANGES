@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.2 — 2026-05-18
+- Add `scope.md` skill: stay in scope, minimal diffs, no unrelated edits
+
 ## v1.0.1 — 2026-05-18
 - `git fetch origin` in each model's clone before collecting `/report` data
 
