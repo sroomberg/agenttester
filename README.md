@@ -131,16 +131,24 @@ your-repo/.agent-tester/skills/style.md   # adds a new skill for this project
 
 Configure one or more LLM evaluators to review each agent's diff after it runs. Multiple independent reviewers reduce the risk of hallucinated assessments, and an aggregate report is synthesized from all of them.
 
-Add an `evaluators` block to your `agent-tester.yaml`:
+Add `providers` and `evaluators` blocks to your `agent-tester.yaml`:
 
 ```yaml
+providers:
+  anthropic:
+    type: anthropic           # reads ANTHROPIC_API_KEY automatically
+
+  local:
+    type: openai
+    endpoint: http://localhost:8004
+
 evaluators:
   - name: claude
-    api: anthropic          # uses ANTHROPIC_API_KEY
+    provider: anthropic
     model: claude-opus-4-7
 
   - name: llama3
-    endpoint: http://localhost:8004   # any OpenAI-compatible endpoint
+    provider: local
     model: meta-llama/Meta-Llama-3-70B-Instruct
 
 evaluation:
@@ -295,8 +303,6 @@ models:
     api_key_env: MY_KEY             # optional; overrides the default OPENAI_API_KEY
 ```
 
-Agent entries whose command matches `agent-tester query <endpoint> <model> {prompt}` are also discovered automatically for backward compatibility.
-
 After each iteration, each evaluator independently critiques every agent's diff for:
 - **Accuracy** — does the code implement what was asked?
 - **Readability** — is it clear and well-named?
@@ -307,16 +313,7 @@ An aggregate assessment is then synthesized across evaluators. The terminal show
 
 ### Iterative Refinement
 
-When evaluators are configured, AgentTester enters a refinement loop:
-
-1. Agents run and commit their changes (`iter-1` commit message)
-2. Evaluators review each agent's diff
-3. You select which agents to re-run (1–all, or press Enter to stop)
-4. Selected agents re-run with the aggregate feedback injected into their prompt
-5. New commits are appended to the same branch (`iter-2`, `iter-3`, …)
-6. New evaluator reports are generated for each iteration
-
-All iterations land on the same branch — use `git log` to see the progression.
+In the REPL, run `/evaluate` once models have committed work, then `/iterate <prompt>` to send the peer evaluations back as context for the next round. New commits are appended to the same branch so `git log` shows the full progression.
 
 ## Interactive Model REPL
 
