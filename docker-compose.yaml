@@ -13,9 +13,9 @@ services:
       - ANTHROPIC_API_KEY
       - OPENAI_API_KEY
       # Azure AI Foundry / Azure OpenAI
-      - AZURE_OPENAI_KEY
+      - AZURE_OPENAI_API_KEY
       # GCP Vertex AI
-      - VERTEX_TOKEN
+      - GOOGLE_API_KEY
       # AWS Bedrock
       - BEDROCK_API_KEY
       - AWS_ACCESS_KEY_ID
