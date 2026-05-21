@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.2 — 2026-05-20
+- Watcher: remove per-turn divider lines; text sections are now separated by a single blank line
+
 ## v1.4.1 — 2026-05-20
 - Remove backward-compat `agent-tester query` model discovery from REPL config loading — `models:` section is the only supported format
 - Remove inline `api: anthropic` / `endpoint:` evaluator syntax — evaluators now require a named `provider:` reference
