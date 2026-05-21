@@ -17,7 +17,7 @@ Branches are named `agenttester/<agent-name>/<run-name>` so you can compare resu
 git diff agenttester/claude/auth-refactor agenttester/aider/auth-refactor
 ```
 
-When no `--name` is given, a slug is derived from the first six words of the prompt plus a short hash (e.g. `add-unit-tests-for-the-auth-a3f2c1`).
+For `agent-tester run`, when no `--name` is given, a slug is derived from the first six words of the prompt plus a short hash (e.g. `add-unit-tests-for-the-auth-a3f2c1`).
 
 ## Install
 
