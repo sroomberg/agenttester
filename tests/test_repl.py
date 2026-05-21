@@ -34,16 +34,12 @@ _PATCH_GLOBAL = "agenttester.config._get_global_config_candidates"
 # ---------------------------------------------------------------------------
 
 
-def _make_config(tmp_path: Path, agents: dict) -> Path:
-    import yaml
-
+def _make_config(tmp_path: Path, models: dict | None = None) -> Path:
+    if models is None:
+        models = {"m": {"endpoint": "http://h:8001", "model": "mid"}}
     p = tmp_path / "agent-tester.yaml"
-    p.write_text(yaml.dump({"agents": agents}))
+    p.write_text(yaml.dump({"models": models}))
     return p
-
-
-def _vllm_command(endpoint: str, model_id: str) -> str:
-    return f"agent-tester query {endpoint} {model_id} {{prompt}}"
 
 
 # ---------------------------------------------------------------------------
@@ -64,72 +60,23 @@ class TestLoadModels:
         models = load_models(tmp_path / "missing.yaml")
         assert models == {}
 
-    def test_discovers_vllm_agent(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
-        )
-        models = load_models(cfg)
-        assert "llama3" in models
-
-    def test_extracts_endpoint_and_model_id(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
-        )
-        m = load_models(cfg)["llama3"]
-        assert isinstance(m.provider, OpenAICompatProvider)
-        assert m.provider.endpoint == "http://h:8001"
-        assert m.model_id == "llama/Llama-3-8B"
-
-    def test_ignores_non_vllm_agents(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {
-                "claude": {"command": "claude -p {prompt}"},
-                "aider": {"command": "aider --message {prompt}"},
-                "llama3": {
-                    "command": _vllm_command("http://h:8001", "llama/Llama-3-8B")
-                },
-            },
-        )
-        models = load_models(cfg)
-        assert set(models) == {"llama3"}
-
-    def test_discovers_multiple_vllm_agents(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {
-                "llama3": {
-                    "command": _vllm_command("http://h:8001", "llama/Llama-3-8B")
-                },
-                "mistral": {"command": _vllm_command("http://h:8002", "mistral/M-7B")},
-                "qwen": {"command": _vllm_command("http://h:8003", "Qwen/Qwen2.5-7B")},
-            },
-        )
-        models = load_models(cfg)
-        assert set(models) == {"llama3", "mistral", "qwen"}
-
     def test_model_starts_with_empty_history(self, tmp_path: Path) -> None:
         cfg = _make_config(
             tmp_path,
-            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
+            {"llama3": {"endpoint": "http://h:8001", "model": "llama/Llama-3-8B"}},
         )
         assert load_models(cfg)["llama3"].messages == []
 
     def test_model_level_api_key_env(self, tmp_path: Path) -> None:
-        cfg = tmp_path / "agent-tester.yaml"
-        cfg.write_text(
-            yaml.dump(
-                {
-                    "agents": {
-                        "azure-llm": {
-                            "command": _vllm_command("http://h:8001", "gpt-4o"),
-                            "api_key_env": "MY_AZURE_KEY",
-                        }
-                    }
+        cfg = _make_config(
+            tmp_path,
+            {
+                "azure-llm": {
+                    "endpoint": "http://h:8001",
+                    "model": "gpt-4o",
+                    "api_key_env": "MY_AZURE_KEY",
                 }
-            )
+            },
         )
         m = load_models(cfg)["azure-llm"]
         assert m.provider.api_key_env == "MY_AZURE_KEY"
@@ -139,11 +86,17 @@ class TestLoadModels:
         cfg.write_text(
             yaml.dump(
                 {
-                    "providers": {"azure": {"api_key_env": "AZURE_KEY"}},
-                    "agents": {
+                    "providers": {
+                        "azure": {
+                            "type": "openai",
+                            "endpoint": "http://h:8001",
+                            "api_key_env": "AZURE_KEY",
+                        }
+                    },
+                    "models": {
                         "azure-llm": {
-                            "command": _vllm_command("http://h:8001", "gpt-4o"),
                             "provider": "azure",
+                            "model": "gpt-4o",
                         }
                     },
                 }
@@ -152,29 +105,10 @@ class TestLoadModels:
         m = load_models(cfg)["azure-llm"]
         assert m.provider.api_key_env == "AZURE_KEY"
 
-    def test_model_level_api_key_env_overrides_provider(self, tmp_path: Path) -> None:
-        cfg = tmp_path / "agent-tester.yaml"
-        cfg.write_text(
-            yaml.dump(
-                {
-                    "providers": {"azure": {"api_key_env": "PROVIDER_KEY"}},
-                    "agents": {
-                        "azure-llm": {
-                            "command": _vllm_command("http://h:8001", "gpt-4o"),
-                            "provider": "azure",
-                            "api_key_env": "MODEL_KEY",
-                        }
-                    },
-                }
-            )
-        )
-        m = load_models(cfg)["azure-llm"]
-        assert m.provider.api_key_env == "MODEL_KEY"
-
     def test_model_without_api_key_env_defaults_to_none(self, tmp_path: Path) -> None:
         cfg = _make_config(
             tmp_path,
-            {"llama3": {"command": _vllm_command("http://h:8001", "llama/Llama-3-8B")}},
+            {"llama3": {"endpoint": "http://h:8001", "model": "llama/Llama-3-8B"}},
         )
         assert load_models(cfg)["llama3"].provider.api_key_env is None
 
@@ -183,15 +117,15 @@ class TestLoadModels:
         global_cfg.write_text(
             yaml.dump(
                 {
-                    "agents": {
-                        "global-model": {"command": _vllm_command("http://g:8001", "g")}
+                    "models": {
+                        "global-model": {"endpoint": "http://g:8001", "model": "g"}
                     }
                 }
             )
         )
         local_cfg = _make_config(
             tmp_path,
-            {"local-model": {"command": _vllm_command("http://l:8001", "l")}},
+            {"local-model": {"endpoint": "http://l:8001", "model": "l"}},
         )
         with patch(_PATCH_GLOBAL, return_value=[global_cfg]):
             models = load_models(local_cfg)
@@ -203,16 +137,12 @@ class TestLoadModels:
         global_cfg = tmp_path / "global.yml"
         global_cfg.write_text(
             yaml.dump(
-                {
-                    "agents": {
-                        "shared": {"command": _vllm_command("http://g:8001", "old")}
-                    }
-                }
+                {"models": {"shared": {"endpoint": "http://g:8001", "model": "old"}}}
             )
         )
         local_cfg = _make_config(
             tmp_path,
-            {"shared": {"command": _vllm_command("http://l:8001", "new")}},
+            {"shared": {"endpoint": "http://l:8001", "model": "new"}},
         )
         with patch(_PATCH_GLOBAL, return_value=[global_cfg]):
             models = load_models(local_cfg)
@@ -224,11 +154,7 @@ class TestLoadModels:
         global_cfg = tmp_path / "global.yml"
         global_cfg.write_text(
             yaml.dump(
-                {
-                    "agents": {
-                        "g-model": {"command": _vllm_command("http://g:8001", "g")}
-                    }
-                }
+                {"models": {"g-model": {"endpoint": "http://g:8001", "model": "g"}}}
             )
         )
         with patch(_PATCH_GLOBAL, return_value=[global_cfg]):
@@ -283,30 +209,6 @@ class TestLoadModels:
         assert isinstance(m.provider, OpenAICompatProvider)
         assert m.provider.endpoint == "http://host:8001"
         assert m.model_id == "llama3"
-
-    def test_explicit_models_win_over_agent_commands(self, tmp_path: Path) -> None:
-        cfg = tmp_path / "agent-tester.yaml"
-        cfg.write_text(
-            yaml.dump(
-                {
-                    "models": {
-                        "shared": {
-                            "endpoint": "http://models:8001",
-                            "model": "from-models-section",
-                        }
-                    },
-                    "agents": {
-                        "shared": {
-                            "command": _vllm_command(
-                                "http://agents:8001", "from-agents"
-                            )
-                        }
-                    },
-                }
-            )
-        )
-        m = load_models(cfg)["shared"]
-        assert m.model_id == "from-models-section"
 
 
 # ---------------------------------------------------------------------------
@@ -441,10 +343,7 @@ class TestModelCompleter:
 
 class TestRunReplSkillSeeding:
     async def test_skills_seeded_as_system_message(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
-        )
+        cfg = _make_config(tmp_path)
         inputs = iter(["exit"])
 
         async def fake_prompt(*_a, **_kw):
@@ -495,10 +394,7 @@ class TestRunReplSkillSeeding:
         assert seen[0] == {"role": "system", "content": "do the thing"}
 
     async def test_no_skills_means_empty_history(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
-        )
+        cfg = _make_config(tmp_path)
         inputs = iter(["hello", "exit"])
 
         async def fake_prompt(*_a, **_kw):
@@ -531,10 +427,7 @@ class TestRunReplSkillSeeding:
         assert pre_query_messages == []
 
     async def test_reset_restores_skill_seed(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
-        )
+        cfg = _make_config(tmp_path)
         inputs = iter(["hello", "/reset", "exit"])
 
         async def fake_prompt(*_a, **_kw):
@@ -575,10 +468,7 @@ class TestRunReplSkillSeeding:
 
 class TestRunReplSession:
     async def test_empty_session_not_saved(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
-        )
+        cfg = _make_config(tmp_path)
         sessions_dir = tmp_path / "sessions"
         inputs = iter(["exit"])
 
@@ -600,10 +490,7 @@ class TestRunReplSession:
         assert not (sessions_dir / "my-session.yaml").exists()
 
     async def test_session_saved_when_prompts_sent(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
-        )
+        cfg = _make_config(tmp_path)
         sessions_dir = tmp_path / "sessions"
         inputs = iter(["hello world", "exit"])
 
@@ -632,10 +519,7 @@ class TestRunReplSession:
     async def test_resumed_session_no_input_not_marked_empty(
         self, tmp_path: Path
     ) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
-        )
+        cfg = _make_config(tmp_path)
         sessions_dir = tmp_path / "sessions"
         saved = ReplSession.create("resume-noinput")
         saved.histories["m"] = [{"role": "user", "content": "prior"}]
@@ -668,10 +552,7 @@ class TestRunReplSession:
         assert any("resume-noinput" in line for line in output_lines)
 
     async def test_session_history_restored_on_resume(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            {"m": {"command": _vllm_command("http://h:8001", "model-id")}},
-        )
+        cfg = _make_config(tmp_path)
         sessions_dir = tmp_path / "sessions"
         saved = ReplSession.create("resume-test")
         saved.histories["m"] = [
@@ -864,9 +745,7 @@ class TestRunEvaluate:
 
 class TestIterateCommand:
     def _make_cfg(self, tmp_path: Path) -> Path:
-        return _make_config(
-            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
-        )
+        return _make_config(tmp_path)
 
     async def test_iterate_requires_evaluate_first(self, tmp_path: Path) -> None:
         cfg = self._make_cfg(tmp_path)
@@ -1052,9 +931,7 @@ class TestBranchSlugRestoration:
     """Branch slugs from session.branches are restored so models don't re-negotiate."""
 
     def _make_cfg(self, tmp_path: Path) -> Path:
-        return _make_config(
-            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
-        )
+        return _make_config(tmp_path)
 
     async def test_existing_branch_restored_to_executor(self, tmp_path: Path) -> None:
         """On resume, mark_branch_ready is called so the branch isn't re-created."""
@@ -1187,9 +1064,7 @@ class TestBranchSlugRestoration:
 
 class TestStopCommand:
     def _make_cfg(self, tmp_path: Path) -> Path:
-        return _make_config(
-            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
-        )
+        return _make_config(tmp_path)
 
     async def test_stop_no_running_models_prints_message(self, tmp_path: Path) -> None:
         cfg = self._make_cfg(tmp_path)
@@ -1244,9 +1119,7 @@ class TestStopCommand:
 
 class TestInterruptCommand:
     def _make_cfg(self, tmp_path: Path) -> Path:
-        return _make_config(
-            tmp_path, {"m": {"command": _vllm_command("http://h:8001", "mid")}}
-        )
+        return _make_config(tmp_path)
 
     async def test_interrupt_without_message_shows_usage(self, tmp_path: Path) -> None:
         cfg = self._make_cfg(tmp_path)
@@ -1310,8 +1183,8 @@ class TestInterruptCommand:
         cfg = _make_config(
             tmp_path,
             {
-                "a": {"command": _vllm_command("http://h:8001", "a")},
-                "b": {"command": _vllm_command("http://h:8002", "b")},
+                "a": {"endpoint": "http://h:8001", "model": "a"},
+                "b": {"endpoint": "http://h:8002", "model": "b"},
             },
         )
         dispatched: dict[str, list[str]] = {}

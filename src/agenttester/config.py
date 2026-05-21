@@ -285,20 +285,7 @@ def _resolve_evaluator_provider(
 
         return base
 
-    # Backward-compat: inline evaluator fields
-    if ev.get("api") == "anthropic":
-        return AnthropicProvider(
-            api_key_env=ev.get("api_key_env") or "ANTHROPIC_API_KEY",
-        )
-    if ev.get("endpoint"):
-        return OpenAICompatProvider(
-            endpoint=ev["endpoint"],
-            api_key_env=ev.get("api_key_env"),
-        )
-
-    raise ValueError(
-        f"Evaluator '{ev['name']}' requires 'provider', 'endpoint', or 'api: anthropic'"
-    )
+    raise ValueError(f"Evaluator '{ev['name']}' requires a 'provider' reference")
 
 
 def load_evaluators_and_eval_config(

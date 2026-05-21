@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
 import subprocess
 import time
 import uuid
@@ -39,10 +38,6 @@ from .session import ReplSession
 from .skills import load_skills
 from .tools import ToolExecutor
 from .vllm import check_connection
-
-_COMMAND_PATTERN = re.compile(
-    r"agent-?tester\s+query\s+(https?://\S+)\s+(\S+)\s+\{prompt\}"
-)
 
 _REPL_MAX_TURNS = 100
 _DEFAULT_MAX_TOKENS = 4096
@@ -195,36 +190,11 @@ def _parse_models_from_file(path: Path) -> dict[str, Model]:
             max_turns=model_cfg.get("max_turns", _REPL_MAX_TURNS),
         )
 
-    # Backward compat: discover OpenAI-compatible models from agent commands
-    for name, agent_data in (data.get("agents") or {}).items():
-        if name in result:
-            continue  # explicit models: entry wins
-        cmd_match = _COMMAND_PATTERN.search(agent_data.get("command", ""))
-        if cmd_match:
-            provider_name = agent_data.get("provider")
-            prov_raw = raw_providers.get(provider_name) if provider_name else None
-            api_key_env = agent_data.get("api_key_env") or (
-                prov_raw.get("api_key_env") if prov_raw else None
-            )
-            result[name] = Model(
-                name=name,
-                model_id=cmd_match.group(2),
-                provider=OpenAICompatProvider(
-                    endpoint=cmd_match.group(1),
-                    api_key_env=api_key_env,
-                ),
-            )
-
     return result
 
 
 def load_models(config_path: Path | None = None) -> dict[str, Model]:
-    """Load REPL models from global then local config; local wins on conflicts.
-
-    Sources (checked per config file):
-    - ``models:`` section — supports any provider type including Bedrock
-    - Agent entries whose command matches the ``agent-tester query`` pattern
-    """
+    """Load REPL models from global then local config; local wins on conflicts."""
     models: dict[str, Model] = {}
     for path in get_config_paths(config_path):
         models.update(_parse_models_from_file(path))
@@ -639,10 +609,7 @@ async def _load_and_check_models(
     models = load_models(config_path)
     if not models:
         console.print("[red]No models found in config.[/red]")
-        console.print(
-            "Add a 'models:' section or agents using 'agent-tester query'"
-            " commands to your agent-tester.yaml."
-        )
+        console.print("Add a 'models:' section to your agent-tester.yaml.")
         return None
 
     if skip_checks:

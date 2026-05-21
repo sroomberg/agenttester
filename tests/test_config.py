@@ -348,9 +348,12 @@ class TestLoadEvaluatorsAndEvalConfig:
     def test_loads_anthropic_evaluator(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
+            "providers:\n"
+            "  my-anthropic:\n"
+            "    type: anthropic\n"
             "evaluators:\n"
             "  - name: claude\n"
-            "    api: anthropic\n"
+            "    provider: my-anthropic\n"
             "    model: claude-opus-4-7\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
@@ -364,10 +367,13 @@ class TestLoadEvaluatorsAndEvalConfig:
     def test_anthropic_evaluator_custom_api_key_env(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
+            "providers:\n"
+            "  my-anthropic:\n"
+            "    type: anthropic\n"
+            "    api_key_env: MY_KEY\n"
             "evaluators:\n"
             "  - name: claude\n"
-            "    api: anthropic\n"
-            "    api_key_env: MY_KEY\n"
+            "    provider: my-anthropic\n"
             "    model: claude-opus-4-7\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
@@ -376,23 +382,30 @@ class TestLoadEvaluatorsAndEvalConfig:
     def test_loads_openai_compat_evaluator(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
+            "providers:\n"
+            "  my-openai:\n"
+            "    type: openai\n"
+            "    endpoint: http://localhost:8004\n"
             "evaluators:\n"
             "  - name: llama3\n"
-            "    endpoint: http://localhost:8004\n"
+            "    provider: my-openai\n"
             "    model: meta-llama/Meta-Llama-3-70B-Instruct\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
         ev = evaluators[0]
         assert isinstance(ev.provider, OpenAICompatProvider)
         assert ev.provider.endpoint == "http://localhost:8004"
-        assert ev.provider.api_key_env is None
+        assert ev.provider.api_key_env == "OPENAI_API_KEY"
 
     def test_loads_multiple_evaluators(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
+            "providers:\n"
+            "  p-anthropic:\n    type: anthropic\n"
+            "  p-openai:\n    type: openai\n    endpoint: http://localhost:8001\n"
             "evaluators:\n"
-            "  - name: a\n    api: anthropic\n    model: m1\n"
-            "  - name: b\n    endpoint: http://localhost:8001\n    model: m2\n"
+            "  - name: a\n    provider: p-anthropic\n    model: m1\n"
+            "  - name: b\n    provider: p-openai\n    model: m2\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
         assert len(evaluators) == 2
@@ -477,7 +490,7 @@ class TestLoadEvaluatorsAndEvalConfig:
         evaluators, _ = load_evaluators_and_eval_config(config_file)
         assert evaluators[0].provider.endpoint == "https://custom.openai.azure.com"
 
-    def test_evaluator_without_provider_uses_anthropic(self, tmp_path: Path) -> None:
+    def test_evaluator_with_named_anthropic_provider(self, tmp_path: Path) -> None:
         config_file = tmp_path / "cfg.yaml"
         config_file.write_text(
             "providers:\n"
@@ -485,14 +498,16 @@ class TestLoadEvaluatorsAndEvalConfig:
             "    type: openai\n"
             "    endpoint: https://my.openai.azure.com\n"
             "    api_key_env: AZURE_KEY\n"
+            "  my-anthropic:\n"
+            "    type: anthropic\n"
             "evaluators:\n"
             "  - name: claude\n"
-            "    api: anthropic\n"
+            "    provider: my-anthropic\n"
             "    model: claude-opus-4-7\n"
         )
         evaluators, _ = load_evaluators_and_eval_config(config_file)
         ev = evaluators[0]
-        assert ev.provider_name is None
+        assert ev.provider_name == "my-anthropic"
         assert isinstance(ev.provider, AnthropicProvider)
 
     def test_loads_bedrock_provider(self, tmp_path: Path) -> None:
