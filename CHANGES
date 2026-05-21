@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.1 — 2026-05-20
+- Remove backward-compat `agent-tester query` model discovery from REPL config loading — `models:` section is the only supported format
+- Remove inline `api: anthropic` / `endpoint:` evaluator syntax — evaluators now require a named `provider:` reference
+- Update error message shown when no models are found in config
+
 ## v1.2.2 — 2026-05-19
 - Remove `/reply` command, `QuestionRegistry`, and `ask_user` tool — sending a targeted message with `@model <msg>` covers the same use cases; models that hit max turns now stop cleanly instead of blocking
 - Remove `cost/` submodule and `agent-tester costs` CLI command — token-level usage is now tracked directly in providers and shown in `/report`
