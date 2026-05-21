@@ -14,7 +14,6 @@ from rich.panel import Panel
 
 from .events import EventLogger
 
-_DIVIDER = "─" * 60
 _CONSECUTIVE_NEWLINES_RE = re.compile(r"\n{3,}")
 
 _TOOL_ARGS_DISPLAY_LEN = 100
@@ -182,7 +181,6 @@ def run_watcher(session_id: str, model_name: str) -> None:
         if _in_stream:
             sys.stdout.write("\n")
             sys.stdout.flush()
-            console.print(f"[dim]{_DIVIDER}[/dim]")
             _in_stream = False
             _stream_filter.reset()
 
@@ -218,10 +216,8 @@ def run_watcher(session_id: str, model_name: str) -> None:
 
                     if etype == "chunk":
                         if not _in_stream:
-                            console.print(
-                                f"\n[bold blue]{model_name}[/bold blue]  "
-                                f"[dim]{_DIVIDER}[/dim]"
-                            )
+                            sys.stdout.write("\n")
+                            sys.stdout.flush()
                             _in_stream = True
                             _stream_filter.reset()
                         filtered = _stream_filter.feed(content)
