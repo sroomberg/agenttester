@@ -60,14 +60,23 @@ class EvaluatorResult:
     agent_name: str
     critique: str
     duration: float
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 async def _call_llm(
     evaluator: EvaluatorConfig,
     messages: list[dict],
     max_tokens: int = 2048,
-) -> str:
-    return await evaluator.provider.async_call(evaluator.model, messages, max_tokens)
+) -> tuple[str, int, int]:
+    result = await evaluator.provider.async_stream_raw(
+        evaluator.model, messages, max_tokens
+    )
+    return (
+        result.get("content") or "",
+        result.get("input_tokens", 0),
+        result.get("output_tokens", 0),
+    )
 
 
 async def evaluate_diff(
@@ -79,8 +88,12 @@ async def evaluate_diff(
     """Send a diff to an LLM evaluator and return a structured critique."""
     start = time.monotonic()
     content = _EVAL_PROMPT.format(prompt=original_prompt, diff=diff or "(no changes)")
+    in_tok = out_tok = 0
     try:
-        critique = await _call_llm(evaluator, [{"role": "user", "content": content}])
+        critique, in_tok, out_tok = await _call_llm(
+            evaluator, [{"role": "user", "content": content}]
+        )
+        critique = critique or "[no response]"
     except Exception as e:
         critique = f"[evaluation error: {e}]"
     return EvaluatorResult(
@@ -88,6 +101,8 @@ async def evaluate_diff(
         agent_name=agent_name,
         critique=critique,
         duration=time.monotonic() - start,
+        input_tokens=in_tok,
+        output_tokens=out_tok,
     )
 
 
@@ -107,7 +122,8 @@ async def aggregate_evaluations(
     )
     content = _AGGREGATE_PROMPT.format(agent_name=agent_name, reviews=reviews)
     try:
-        return await _call_llm(aggregator, [{"role": "user", "content": content}])
+        text, _, _ = await _call_llm(aggregator, [{"role": "user", "content": content}])
+        return text or f"[aggregation error]\n\n{reviews}"
     except Exception as e:
         return f"[aggregation error: {e}]\n\n{reviews}"
 
@@ -122,8 +138,9 @@ async def summarize_if_needed(
         return text
     content = _SUMMARIZE_PROMPT.format(text=text)
     try:
-        return await _call_llm(
+        summary, _, _ = await _call_llm(
             summarizer, [{"role": "user", "content": content}], max_tokens=500
         )
+        return summary or text[: max_tokens * 4] + "\n\n[... truncated ...]"
     except Exception:
         return text[: max_tokens * 4] + "\n\n[... truncated ...]"
