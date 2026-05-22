@@ -214,8 +214,9 @@ async def _query_async(
         model.provider, (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
     ):
         saved = model.save_messages()
+        accum = [0, 0]
         try:
-            return await run_agent_loop(
+            result = await run_agent_loop(
                 model.provider,
                 model.model_id,
                 model.messages,
@@ -225,7 +226,11 @@ async def _query_async(
                 max_tokens=model.max_tokens,
                 on_event=on_event,
                 model_name=model.name,
+                token_accum=accum,
             )
+            model.input_tokens += accum[0]
+            model.output_tokens += accum[1]
+            return result
         except Exception as e:
             model.restore_messages(saved)
             return f"[error] {e}"
@@ -421,6 +426,7 @@ async def _run_report(
     models: dict[str, Model],
     console: Console,
     reports_store: dict[str, dict[str, str]],
+    token_usage: dict[str, dict[str, dict[str, int]]] | None = None,
 ) -> None:
     """Collect each model's work and display a summary. Populates *reports_store*."""
 
@@ -449,11 +455,19 @@ async def _run_report(
                 console.print(f"  [dim]{line}[/dim]")
         if report["stat"]:
             console.print(f"  {report['stat']}")
-        m = models.get(name)
-        if m and (m.input_tokens or m.output_tokens):
-            console.print(
-                f"  [dim]tokens: {m.input_tokens:,} in / {m.output_tokens:,} out[/dim]"
-            )
+        if token_usage and name in token_usage:
+            for phase, counts in token_usage[name].items():
+                in_t = counts.get("input", 0)
+                out_t = counts.get("output", 0)
+                if in_t or out_t:
+                    console.print(f"  [dim]{phase}: {in_t:,} in / {out_t:,} out[/dim]")
+        else:
+            m = models.get(name)
+            if m and (m.input_tokens or m.output_tokens):
+                console.print(
+                    f"  [dim]tokens: {m.input_tokens:,} in"
+                    f" / {m.output_tokens:,} out[/dim]"
+                )
         console.print()
 
 
@@ -465,6 +479,7 @@ async def _run_evaluate(
     eval_results: dict[str, dict[str, str]] | None = None,
     reviewer_names: set[str] | None = None,
     eval_dir: Path | None = None,
+    on_tokens: Callable[[str, int, int], None] | None = None,
 ) -> None:
     """Cross-evaluation: each model reviews every other model's work.
 
@@ -573,6 +588,8 @@ async def _run_evaluate(
             reviewer_name, text, in_tok, out_tok = await coro
             models[reviewer_name].input_tokens += in_tok
             models[reviewer_name].output_tokens += out_tok
+            if on_tokens and (in_tok or out_tok):
+                on_tokens(reviewer_name, in_tok, out_tok)
             console.print(
                 f"[bold]{reviewer_name}[/bold] reviews [bold]{reviewed_name}[/bold]:"
             )
@@ -950,6 +967,8 @@ async def run_repl(
                                 _p: str = full_prompt,
                             ) -> None:
                                 _busy_models.add(_nm)
+                                _in_before = _m.input_tokens
+                                _out_before = _m.output_tokens
                                 try:
                                     _, reply = await _run_one(
                                         _nm,
@@ -963,6 +982,12 @@ async def run_repl(
                                     return
                                 finally:
                                     _busy_models.discard(_nm)
+                                delta_in = _m.input_tokens - _in_before
+                                delta_out = _m.output_tokens - _out_before
+                                if delta_in or delta_out:
+                                    session.add_tokens(
+                                        _nm, "queries", delta_in, delta_out
+                                    )
                                 if _m.event_logger is not None:
                                     _m.event_logger.log("response", reply)
                                     _m.event_logger.log(
@@ -1069,7 +1094,9 @@ async def run_repl(
                 console.print("[dim]Collecting work reports…[/dim]\n")
 
                 async def _report_task() -> None:
-                    await _run_report(models, console, _reports)
+                    await _run_report(
+                        models, console, _reports, token_usage=session.token_usage
+                    )
                     session.reports = dict(_reports)
                     session.save()
 
@@ -1120,6 +1147,10 @@ async def run_repl(
                     _eval_dir_: Path | None = _eval_dir,
                 ) -> None:
                     nonlocal _eval_done, _eval_total
+
+                    def _on_tokens(model_name: str, in_tok: int, out_tok: int) -> None:
+                        session.add_tokens(model_name, "evaluation", in_tok, out_tok)
+
                     try:
                         await _run_evaluate(
                             models,
@@ -1129,6 +1160,7 @@ async def run_repl(
                             eval_results=_eval_results,
                             reviewer_names=_reviewer_names,
                             eval_dir=_eval_dir_,
+                            on_tokens=_on_tokens,
                         )
                     finally:
                         _eval_done = 0
@@ -1261,6 +1293,8 @@ async def run_repl(
                     _prompt: str = prompt_text,
                 ) -> None:
                     _busy_models.add(_nm)
+                    _in_before = _m.input_tokens
+                    _out_before = _m.output_tokens
                     try:
                         _, reply = await _run_one(
                             _nm,
@@ -1274,6 +1308,10 @@ async def run_repl(
                         return
                     finally:
                         _busy_models.discard(_nm)
+                    delta_in = _m.input_tokens - _in_before
+                    delta_out = _m.output_tokens - _out_before
+                    if delta_in or delta_out:
+                        session.add_tokens(_nm, "queries", delta_in, delta_out)
                     if _m.event_logger is not None:
                         _m.event_logger.log("response", reply)
                         _m.event_logger.log("status", "waiting for next instructions")

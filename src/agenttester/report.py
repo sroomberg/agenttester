@@ -99,4 +99,25 @@ def generate_report(
 
         lines.append("")
 
+    # Evaluator token usage
+    if eval_results:
+        ev_tokens: dict[str, list[int]] = {}
+        for agent_evals in eval_results.values():
+            for er in agent_evals:
+                bucket = ev_tokens.setdefault(er.evaluator_name, [0, 0])
+                bucket[0] += er.input_tokens
+                bucket[1] += er.output_tokens
+        if any(t[0] or t[1] for t in ev_tokens.values()):
+            lines.extend(
+                [
+                    "## Evaluation Token Usage",
+                    "",
+                    "| Evaluator | Input | Output |",
+                    "|-----------|------:|-------:|",
+                ]
+            )
+            for ev_name, (in_tok, out_tok) in sorted(ev_tokens.items()):
+                lines.append(f"| {ev_name} | {in_tok:,} | {out_tok:,} |")
+            lines.append("")
+
     return "\n".join(lines)

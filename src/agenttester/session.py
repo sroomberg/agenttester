@@ -41,6 +41,7 @@ class ReplSession:
     branches: list[str] = field(default_factory=list)
     reports: dict[str, dict[str, str]] = field(default_factory=dict)
     eval_results: dict[str, dict[str, str]] = field(default_factory=dict)
+    token_usage: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)
 
     @classmethod
     def create(cls, name: str) -> ReplSession:
@@ -67,6 +68,7 @@ class ReplSession:
             branches=data.get("branches", []),
             reports=data.get("reports", {}),
             eval_results=data.get("eval_results", {}),
+            token_usage=data.get("token_usage", {}),
         )
 
     @classmethod
@@ -83,6 +85,15 @@ class ReplSession:
         except (FileNotFoundError, KeyError):
             return cls.create(name), True
 
+    def add_tokens(
+        self, model_name: str, phase: str, in_tok: int, out_tok: int
+    ) -> None:
+        """Accumulate token counts for *model_name* under *phase* in place."""
+        model_usage = self.token_usage.setdefault(model_name, {})
+        phase_usage = model_usage.setdefault(phase, {"input": 0, "output": 0})
+        phase_usage["input"] += in_tok
+        phase_usage["output"] += out_tok
+
     def save(
         self, sessions_dir: Path | None = None, max_sessions: int | None = None
     ) -> None:
@@ -98,6 +109,7 @@ class ReplSession:
                     "branches": self.branches,
                     "reports": self.reports,
                     "eval_results": self.eval_results,
+                    "token_usage": self.token_usage,
                 },
                 default_flow_style=False,
                 allow_unicode=True,
