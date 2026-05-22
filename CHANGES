@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.4.3 — 2026-05-22
+## v1.4.4 — 2026-05-22
 - Session now persists token usage broken down by phase (`queries`, `evaluation`) per model; `/report` displays per-phase counts instead of a cumulative total
 - `evaluator.py`: `EvaluatorResult` carries `input_tokens`/`output_tokens`; `_call_llm` switched to `async_stream_raw` to capture token counts from LLM evaluations
 - `report.py`: generated markdown reports include an "Evaluation Token Usage" table when evaluators return token counts
