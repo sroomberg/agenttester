@@ -100,6 +100,7 @@ async def run_agent_loop(
     max_tokens: int = 4096,
     on_event: Callable[[str, str], None] | None = None,
     model_name: str | None = None,
+    token_accum: list[int] | None = None,
 ) -> str:
     """Async tool-use agent loop, mutating *messages* in place.
 
@@ -129,6 +130,9 @@ async def run_agent_loop(
                 tools=executor.tool_definitions,
                 on_chunk=_on_chunk,
             )
+            if token_accum is not None:
+                token_accum[0] += msg.get("input_tokens", 0)
+                token_accum[1] += msg.get("output_tokens", 0)
             tool_calls = msg.get("tool_calls")
             text_based = False
 

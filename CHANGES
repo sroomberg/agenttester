@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.5 — 2026-05-22
+- Fix: commit missing `token_accum` parameter in `run_agent_loop` that caused a TypeError when tool-use models ran queries
+
 ## v1.4.4 — 2026-05-22
 - Session now persists token usage broken down by phase (`queries`, `evaluation`) per model; `/report` displays per-phase counts instead of a cumulative total
 - `evaluator.py`: `EvaluatorResult` carries `input_tokens`/`output_tokens`; `_call_llm` switched to `async_stream_raw` to capture token counts from LLM evaluations
