@@ -47,6 +47,7 @@ class TestLoadConfigPresets:
         assert "claude" in agents
         assert "aider" in agents
         assert "codex" in agents
+        assert "cursor" in agents
 
     def test_preset_types(self) -> None:
         agents = load_config()
@@ -60,6 +61,14 @@ class TestLoadConfigPresets:
     def test_aider_preset_has_manual_commit(self) -> None:
         agents = load_config()
         assert agents["aider"].commit_style == "manual"
+
+    def test_cursor_preset_uses_auto_router(self) -> None:
+        agents = load_config()
+        assert agents["cursor"].commit_style == "auto"
+        assert "--model" not in agents["cursor"].command
+        assert "agent -p" in agents["cursor"].command
+        assert "--force" in agents["cursor"].command
+        assert "--trust" in agents["cursor"].command
 
     def test_presets_default_to_localhost(self) -> None:
         agents = load_config()
@@ -125,11 +134,11 @@ class TestLoadConfigYaml:
     def test_missing_config_file_returns_presets(self) -> None:
         agents = load_config(Path("/nonexistent/config.yaml"))
         assert "claude" in agents
-        assert len(agents) == 3  # only presets
+        assert len(agents) == 4  # only presets
 
     def test_none_config_returns_presets(self) -> None:
         agents = load_config(None)
-        assert len(agents) >= 3
+        assert len(agents) >= 4
 
     def test_loads_agent_tester_filename(self, tmp_path: Path) -> None:
         config_file = tmp_path / "agent-tester.yaml"

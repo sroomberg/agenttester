@@ -45,6 +45,7 @@ class TestAgentsCommand:
         assert "claude" in result.output
         assert "aider" in result.output
         assert "codex" in result.output
+        assert "cursor" in result.output
 
 
 class TestRunValidation:

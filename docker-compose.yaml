@@ -10,6 +10,7 @@ services:
     environment:
       - SSH_AUTH_SOCK=/ssh-agent
       # Pass API keys through to agents
+      - CURSOR_API_KEY
       - ANTHROPIC_API_KEY
       - OPENAI_API_KEY
       # Azure AI Foundry / Azure OpenAI

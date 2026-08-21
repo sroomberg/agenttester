@@ -22,4 +22,14 @@ PRESETS: dict[str, dict] = {
         "commit_style": "auto",
         "timeout": 600,
     },
+    # Uses Cursor Auto (model router) when --model is omitted.
+    # Compare against any other agent (claude, codex, …) or a second
+    # Cursor entry with --model <id> (see `agent models`). Auth via
+    # CURSOR_API_KEY or `agent login`. Do not pass Cursor's -w/--worktree —
+    # AgentTester already isolates worktrees.
+    "cursor": {
+        "command": "agent -p --force --trust {prompt}",
+        "commit_style": "auto",
+        "timeout": 600,
+    },
 }
