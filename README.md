@@ -27,7 +27,44 @@ uv pip install -e ".[dev]"
 
 ## Configuration
 
-Copy `config.example.yaml` to `agent-tester.yaml` (or `agent-tester.yml`) in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, and `codex`.
+Copy `config.example.yaml` to `agent-tester.yaml` (or `agent-tester.yml`) in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, `codex`, and `cursor`.
+
+### Comparing Cursor Auto to another agent
+
+The `cursor` preset runs the [Cursor CLI](https://cursor.com/docs/cli/overview) in print mode without `--model`, which uses **Auto** (the model router). Run it alongside any other agent (a static Claude/Codex/Aider setup, or another Cursor invocation with `--model`) in the same pass:
+
+```bash
+# Cursor Auto vs Claude
+agent-tester run "Refactor the auth module" --agents cursor,claude
+
+# Cursor Auto vs Codex
+agent-tester run "Refactor the auth module" --agents cursor,codex
+```
+
+You can also pin a Cursor model (or any other CLI agent) as a separate config entry — useful when you want two Cursor variants, or to show that any agent tool works the same way:
+
+```yaml
+agents:
+  cursor:
+    command: "agent -p --force --trust {prompt}"
+    commit_style: auto
+    timeout: 600
+    # Prefer exporting CURSOR_API_KEY in the shell / Docker env.
+    # Or set it here (do not commit secrets):
+    # env:
+    #   CURSOR_API_KEY: "..."
+
+  cursor-composer:
+    command: "agent -p --force --trust --model composer-2.5 {prompt}"
+    commit_style: auto
+    timeout: 600
+```
+
+```bash
+agent-tester run "Refactor the auth module" --agents cursor,cursor-composer
+```
+
+Do not pass Cursor's `-w`/`--worktree` flag — AgentTester already isolates each agent in its own git worktree. See [Cursor CLI authentication](#cursor-cli) for `CURSOR_API_KEY` / `agent login`.
 
 ### Config file discovery
 
@@ -107,6 +144,29 @@ your-repo/.agent-tester/skills/style.md   # adds a new skill for this project
 ```
 
 ## Authentication
+
+### Cursor CLI
+
+The `cursor` shell agent uses the Cursor CLI (`agent`), not the `providers:` block. Authenticate in one of these ways:
+
+1. **Interactive:** run `agent login` once on the host (stores credentials for later runs).
+2. **API key:** export `CURSOR_API_KEY` in the environment (recommended for CI / Docker / headless). AgentTester forwards the process environment to each agent; `docker-compose.yaml` also passes `CURSOR_API_KEY` through from the host.
+3. **Per-agent config:** set `env.CURSOR_API_KEY` on an agent entry in YAML (useful for remote hosts). Prefer the environment over committing secrets to config.
+
+```bash
+export CURSOR_API_KEY=your_api_key_here
+agent-tester run "…" --agents cursor,claude
+```
+
+```yaml
+agents:
+  cursor:
+    command: "agent -p --force --trust {prompt}"
+    env:
+      CURSOR_API_KEY: "your_api_key_here"   # prefer env / Docker; do not commit
+```
+
+### Providers (evaluators and REPL models)
 
 Define a `providers` block to share credentials across evaluators and REPL model agents. Each provider type reads credentials from a standard environment variable automatically — no `api_key_env` required unless you want to override the default.
 
@@ -337,7 +397,7 @@ The command walks through two phases — select sessions to delete entirely, the
 
 ## Docker
 
-Provider API keys are forwarded automatically from the host environment — set any of `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY`, `GOOGLE_API_KEY`, `BEDROCK_API_KEY`, or the standard `AWS_*` variables before running.
+Provider and agent API keys are forwarded automatically from the host environment — set any of `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY`, `GOOGLE_API_KEY`, `BEDROCK_API_KEY`, or the standard `AWS_*` variables before running.
 
 ```bash
 # Open REPL against the current directory
