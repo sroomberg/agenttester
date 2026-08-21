@@ -31,6 +31,7 @@ from .loop import run_agent_loop
 from .providers import (
     AnthropicProvider,
     BedrockProvider,
+    CursorProvider,
     OpenAICompatProvider,
     Provider,
 )
@@ -154,6 +155,9 @@ def _provider_label(m: Model) -> str:
         return m.provider.endpoint
     if isinstance(m.provider, BedrockProvider):
         return f"bedrock:{m.provider.region}"
+    if isinstance(m.provider, CursorProvider):
+        mid = m.model_id or "auto"
+        return f"cursor:{mid}"
     return type(m.provider).__name__.lower()
 
 
@@ -234,6 +238,35 @@ async def _query_async(
         except Exception as e:
             model.restore_messages(saved)
             return f"[error] {e}"
+
+    # Cursor CLI is a full agent: point it at this model's worktree and stream.
+    # Do not use AgentTester's OpenAI-style tool loop.
+    if isinstance(model.provider, CursorProvider):
+        if model.workdir:
+            model.provider.workspace = model.workdir
+        model.add_message("user", prompt)
+        parts: list[str] = []
+
+        def _on_cursor_chunk(chunk: str) -> None:
+            parts.append(chunk)
+            if on_event:
+                on_event("chunk", chunk)
+
+        try:
+            result = await model.provider.async_stream_raw(
+                model.model_id,
+                model.messages,
+                model.max_tokens,
+                on_chunk=_on_cursor_chunk,
+            )
+            reply = result.get("content") or "".join(parts)
+            model.input_tokens += result.get("input_tokens", 0)
+            model.output_tokens += result.get("output_tokens", 0)
+        except Exception as e:
+            model.pop_message()
+            return f"[error] {e}"
+        model.add_message("assistant", reply)
+        return reply
 
     streaming_providers = (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
     if isinstance(model.provider, streaming_providers):
@@ -1024,6 +1057,8 @@ async def run_repl(
             if raw == "/reset":
                 for model in models.values():
                     model.messages = list(seed)
+                    if isinstance(model.provider, CursorProvider):
+                        model.provider.reset_session()
                 console.print("[dim]Context cleared.[/dim]\n")
                 continue
 
