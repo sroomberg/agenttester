@@ -337,17 +337,31 @@ class TestRunOne:
         provider = MagicMock()
         provider.async_call = AsyncMock(return_value="ok")
         model = Model(name="llama3", model_id="llama", provider=provider)
-        name, result = await _run_one("llama3", model, "hello")
+        name, result, duration = await _run_one("llama3", model, "hello")
         assert name == "llama3"
         assert result == "ok"
+        assert duration >= 0
 
     async def test_returns_error_string_on_exception(self) -> None:
         provider = MagicMock()
         provider.async_call = AsyncMock(side_effect=OSError("unreachable"))
         model = Model(name="llama3", model_id="llama", provider=provider)
-        name, result = await _run_one("llama3", model, "hello")
+        name, result, duration = await _run_one("llama3", model, "hello")
         assert name == "llama3"
         assert "[error]" in result
+        assert duration >= 0
+
+
+class TestFormatDuration:
+    def test_seconds(self) -> None:
+        from agenttester.repl import _format_duration
+
+        assert _format_duration(12.34) == "12.3s"
+
+    def test_minutes(self) -> None:
+        from agenttester.repl import _format_duration
+
+        assert _format_duration(125) == "2m 5s"
 
 
 # ---------------------------------------------------------------------------

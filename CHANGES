@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.7.0 — 2026-08-21
+- REPL: show time to task completion when each model finishes, persist timings in the session, and include last/total duration in `/report`
+- `agent-tester run` reports: add a fastest-first time-to-completion ranking among successful agents
+
 ## v1.6.0 — 2026-08-21
 - Add `type: cursor` REPL provider (Cursor CLI) so Auto / Router works in `agent-tester repl` alongside other models; `/reset` clears the CLI chat session; document `models.cursor-auto` config
 
