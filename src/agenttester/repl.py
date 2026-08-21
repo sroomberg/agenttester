@@ -46,6 +46,18 @@ _MAX_DIFF_CHARS = 4000
 _CTRL_C_TIMEOUT = 2.0
 _BRANCH_SLUG_MAX_LEN = 60
 
+
+def _format_duration(seconds: float) -> str:
+    """Human-readable duration for task completion display."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{int(minutes)}m {secs:.0f}s"
+    hours, minutes = divmod(int(minutes), 60)
+    return f"{hours}h {minutes}m"
+
+
 _SLASH_COMMANDS = [
     ("/reset", "clear conversation history"),
     ("/status", "show running/idle models"),
@@ -327,12 +339,25 @@ async def _run_one(
     model: Model,
     prompt: str,
     on_event: Callable[[str, str], None] | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, float]:
+    """Run one model query. Returns ``(name, reply, duration_seconds)``."""
+    start = time.monotonic()
     try:
         r = await _query_async(model, prompt, on_event=on_event)
     except Exception as exc:
         r = str(exc)
-    return name, r
+    return name, r, time.monotonic() - start
+
+
+def _print_model_done(console: Console, name: str, reply: str, duration: float) -> None:
+    """Print the per-model completion line including time to task completion."""
+    elapsed = _format_duration(duration)
+    if reply.startswith("[error]"):
+        console.print(f"  [red]✗ {name}[/red]: {reply[:100]}  [dim]({elapsed})[/dim]")
+    else:
+        console.print(
+            f"  [green]✓[/green] [bold]{name}[/bold]: done  [dim]({elapsed})[/dim]"
+        )
 
 
 def _clean_name(raw: str) -> str:
@@ -460,6 +485,7 @@ async def _run_report(
     console: Console,
     reports_store: dict[str, dict[str, str]],
     token_usage: dict[str, dict[str, dict[str, int]]] | None = None,
+    query_timings: dict[str, dict[str, float | int]] | None = None,
 ) -> None:
     """Collect each model's work and display a summary. Populates *reports_store*."""
 
@@ -478,6 +504,22 @@ async def _run_report(
         console.print(
             "[yellow]No models have committed or uncommitted work yet.[/yellow]\n"
         )
+        # Still show timings even when there is no git work yet.
+        if query_timings:
+            console.print("[bold]Time to completion[/bold]")
+            for name in models:
+                timing = query_timings.get(name)
+                if not timing:
+                    continue
+                last = float(timing.get("last", 0))
+                total = float(timing.get("total", 0))
+                count = int(timing.get("count", 0))
+                console.print(
+                    f"  [bold]{name}[/bold]: last {_format_duration(last)}"
+                    f" · total {_format_duration(total)} ({count} quer"
+                    f"{'y' if count == 1 else 'ies'})"
+                )
+            console.print()
         return
 
     console.print(f"\n[bold]Work report — {len(models_with_work)} model(s)[/bold]\n")
@@ -488,6 +530,16 @@ async def _run_report(
                 console.print(f"  [dim]{line}[/dim]")
         if report["stat"]:
             console.print(f"  {report['stat']}")
+        if query_timings and name in query_timings:
+            timing = query_timings[name]
+            last = float(timing.get("last", 0))
+            total = float(timing.get("total", 0))
+            count = int(timing.get("count", 0))
+            console.print(
+                f"  [dim]time: last {_format_duration(last)}"
+                f" · total {_format_duration(total)} ({count} quer"
+                f"{'y' if count == 1 else 'ies'})[/dim]"
+            )
         if token_usage and name in token_usage:
             for phase, counts in token_usage[name].items():
                 in_t = counts.get("input", 0)
@@ -1003,7 +1055,7 @@ async def run_repl(
                                 _in_before = _m.input_tokens
                                 _out_before = _m.output_tokens
                                 try:
-                                    _, reply = await _run_one(
+                                    _, reply, duration = await _run_one(
                                         _nm,
                                         _m,
                                         _p,
@@ -1021,19 +1073,15 @@ async def run_repl(
                                     session.add_tokens(
                                         _nm, "queries", delta_in, delta_out
                                     )
+                                session.add_timing(_nm, duration)
                                 if _m.event_logger is not None:
                                     _m.event_logger.log("response", reply)
                                     _m.event_logger.log(
-                                        "status", "waiting for next instructions"
+                                        "status",
+                                        f"waiting for next instructions"
+                                        f" (completed in {_format_duration(duration)})",
                                     )
-                                if reply.startswith("[error]"):
-                                    console.print(
-                                        f"  [red]✗ {_nm}[/red]: {reply[:100]}"
-                                    )
-                                else:
-                                    console.print(
-                                        f"  [green]✓[/green] [bold]{_nm}[/bold]: done"
-                                    )
+                                _print_model_done(console, _nm, reply, duration)
 
                             _had_user_input = True
                             _it2 = asyncio.create_task(_iterate_run())
@@ -1130,7 +1178,11 @@ async def run_repl(
 
                 async def _report_task() -> None:
                     await _run_report(
-                        models, console, _reports, token_usage=session.token_usage
+                        models,
+                        console,
+                        _reports,
+                        token_usage=session.token_usage,
+                        query_timings=session.query_timings,
                     )
                     session.reports = dict(_reports)
                     session.save()
@@ -1331,7 +1383,7 @@ async def run_repl(
                     _in_before = _m.input_tokens
                     _out_before = _m.output_tokens
                     try:
-                        _, reply = await _run_one(
+                        _, reply, duration = await _run_one(
                             _nm,
                             _m,
                             _prompt,
@@ -1347,13 +1399,15 @@ async def run_repl(
                     delta_out = _m.output_tokens - _out_before
                     if delta_in or delta_out:
                         session.add_tokens(_nm, "queries", delta_in, delta_out)
+                    session.add_timing(_nm, duration)
                     if _m.event_logger is not None:
                         _m.event_logger.log("response", reply)
-                        _m.event_logger.log("status", "waiting for next instructions")
-                    if reply.startswith("[error]"):
-                        console.print(f"  [red]✗ {_nm}[/red]: {reply[:100]}")
-                    else:
-                        console.print(f"  [green]✓[/green] [bold]{_nm}[/bold]: done")
+                        _m.event_logger.log(
+                            "status",
+                            f"waiting for next instructions"
+                            f" (completed in {_format_duration(duration)})",
+                        )
+                    _print_model_done(console, _nm, reply, duration)
 
                 _had_user_input = True
                 _bt = asyncio.create_task(_background_run())

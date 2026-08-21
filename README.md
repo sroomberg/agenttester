@@ -367,7 +367,7 @@ The REPL fans out each prompt to all configured models in parallel and maintains
 | `/status` | Show which models are running or idle |
 | `/stop [@model …]` | Cancel a running model. Without a tag, stops all busy models. |
 | `/interrupt [@model …] <message>` | Cancel and immediately re-dispatch with `<message>`. Without a tag, targets all busy models. |
-| `/report` | Show each model's git commits, diff stats, and token usage. Report data is persisted in the session file (`~/.config/agenttester/sessions/<name>.yaml`). |
+| `/report` | Show each model's git commits, diff stats, token usage, and time to completion. Report data is persisted in the session file (`~/.config/agenttester/sessions/<name>.yaml`). |
 | `/evaluate [m1,m2,…]` | Cross-evaluate: each model reviews the others' work. Evaluation documents are saved to `.agenttester/evaluations/<session>/`. Eval results are also persisted in the session file. |
 | `/iterate <prompt>` | After `/evaluate`, inject peer evaluations as context and send an iteration prompt. Requires `y` confirmation. |
 

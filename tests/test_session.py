@@ -136,3 +136,21 @@ class TestDelete:
     def test_delete_missing_is_noop(self, tmp_path: Path) -> None:
         s = ReplSession.create("ghost")
         s.delete(tmp_path)  # should not raise
+
+
+class TestQueryTimings:
+    def test_add_timing_accumulates(self) -> None:
+        s = ReplSession.create("t")
+        s.add_timing("m1", 1.5)
+        s.add_timing("m1", 2.5)
+        assert s.query_timings["m1"]["last"] == 2.5
+        assert s.query_timings["m1"]["total"] == 4.0
+        assert s.query_timings["m1"]["count"] == 2
+
+    def test_timings_roundtrip(self, tmp_path: Path) -> None:
+        s = ReplSession.create("timed")
+        s.add_timing("cursor-auto", 12.3)
+        s.save(tmp_path)
+        loaded = ReplSession.load("timed", tmp_path)
+        assert loaded.query_timings["cursor-auto"]["last"] == 12.3
+        assert loaded.query_timings["cursor-auto"]["count"] == 1
