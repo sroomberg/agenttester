@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.6.0 — 2026-08-21
+- Add `type: cursor` REPL provider (Cursor CLI) so Auto / Router works in `agent-tester repl` alongside other models; `/reset` clears the CLI chat session; document `models.cursor-auto` config
+
 ## v1.5.0 — 2026-08-21
 - Add built-in `cursor` agent preset (`agent -p --force --trust`) using Cursor Auto when `--model` is omitted; document comparing Auto to other agents (claude/codex/etc.), optional `cursor-composer` example, and `CURSOR_API_KEY` auth (README, `config.example.yaml`, Docker Compose)
 
