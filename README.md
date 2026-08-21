@@ -27,7 +27,30 @@ uv pip install -e ".[dev]"
 
 ## Configuration
 
-Copy `config.example.yaml` to `agent-tester.yaml` (or `agent-tester.yml`) in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, and `codex`.
+Copy `config.example.yaml` to `agent-tester.yaml` (or `agent-tester.yml`) in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, `codex`, and `cursor`.
+
+### Cursor Auto vs a static model
+
+The `cursor` preset runs the [Cursor CLI](https://cursor.com/docs/cli/overview) in print mode without `--model`, which uses **Auto** (the model router). To A/B Auto against a pinned model, add a second agent that passes `--model <id>` (see `agent models` for ids available to your account):
+
+```yaml
+agents:
+  cursor:
+    command: "agent -p --force --trust {prompt}"
+    commit_style: auto
+    timeout: 600
+
+  cursor-composer:
+    command: "agent -p --force --trust --model composer-2.5 {prompt}"
+    commit_style: auto
+    timeout: 600
+```
+
+```bash
+agent-tester run "Refactor the auth module" --agents cursor,cursor-composer
+```
+
+Authenticate with `agent login` or set `CURSOR_API_KEY`. Do not pass Cursor's `-w`/`--worktree` flag — AgentTester already isolates each agent in its own git worktree.
 
 ### Config file discovery
 
