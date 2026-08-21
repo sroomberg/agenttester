@@ -42,6 +42,8 @@ class ReplSession:
     reports: dict[str, dict[str, str]] = field(default_factory=dict)
     eval_results: dict[str, dict[str, str]] = field(default_factory=dict)
     token_usage: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)
+    # model -> {total: float seconds, last: float, count: int}
+    query_timings: dict[str, dict[str, float | int]] = field(default_factory=dict)
 
     @classmethod
     def create(cls, name: str) -> ReplSession:
@@ -69,6 +71,7 @@ class ReplSession:
             reports=data.get("reports", {}),
             eval_results=data.get("eval_results", {}),
             token_usage=data.get("token_usage", {}),
+            query_timings=data.get("query_timings", {}),
         )
 
     @classmethod
@@ -94,6 +97,15 @@ class ReplSession:
         phase_usage["input"] += in_tok
         phase_usage["output"] += out_tok
 
+    def add_timing(self, model_name: str, seconds: float) -> None:
+        """Record a query duration for *model_name* (last + cumulative)."""
+        timing = self.query_timings.setdefault(
+            model_name, {"total": 0.0, "last": 0.0, "count": 0}
+        )
+        timing["last"] = float(seconds)
+        timing["total"] = float(timing.get("total", 0.0)) + float(seconds)
+        timing["count"] = int(timing.get("count", 0)) + 1
+
     def save(
         self, sessions_dir: Path | None = None, max_sessions: int | None = None
     ) -> None:
@@ -110,6 +122,7 @@ class ReplSession:
                     "reports": self.reports,
                     "eval_results": self.eval_results,
                     "token_usage": self.token_usage,
+                    "query_timings": self.query_timings,
                 },
                 default_flow_style=False,
                 allow_unicode=True,

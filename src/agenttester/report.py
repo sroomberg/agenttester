@@ -51,6 +51,20 @@ def generate_report(
             f"| -{stats.deletions} |"
         )
 
+    # Rank by time to task completion (fastest first among successful agents)
+    finished = sorted(
+        (r for r in results if r.exit_code == 0 and not r.error),
+        key=lambda r: r.duration,
+    )
+    if len(finished) >= 2:
+        lines.extend(
+            [
+                "",
+                "**Time to completion** (fastest first): "
+                + ", ".join(f"{r.agent_name} ({r.duration:.1f}s)" for r in finished),
+            ]
+        )
+
     lines.append("")
 
     # Per-agent details

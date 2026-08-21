@@ -53,6 +53,19 @@ class TestGenerateReport:
         assert "✅" in report
         assert "❌" in report
 
+    def test_time_to_completion_ranking(self) -> None:
+        results = [
+            AgentResult("slow", 0, 30.0, "", "", None),
+            AgentResult("fast", 0, 5.0, "", "", None),
+            AgentResult("failed", 1, 1.0, "", "", "boom"),
+        ]
+        report = generate_report("r-time", "b" * 40, "test", results, _mock_git())
+        assert "**Time to completion**" in report
+        # Fastest successful agent listed first
+        ranking = report.split("**Time to completion**")[1].split("\n")[0]
+        assert ranking.index("fast") < ranking.index("slow")
+        assert "failed" not in ranking
+
     def test_per_agent_sections(self) -> None:
         results = [
             AgentResult("agent1", 0, 3.0, "", "", None),
