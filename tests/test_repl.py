@@ -12,6 +12,7 @@ from prompt_toolkit.document import Document
 from agenttester.providers import (
     AnthropicProvider,
     BedrockProvider,
+    CursorProvider,
     OpenAICompatProvider,
 )
 from agenttester.repl import (
@@ -191,6 +192,23 @@ class TestLoadModels:
         assert m.provider.aws_profile == "my-profile"
         assert m.model_id == "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
+    def test_explicit_models_section_with_cursor_provider(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "agent-tester.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "providers": {"cursor": {"type": "cursor"}},
+                    "models": {
+                        "cursor-auto": {"provider": "cursor", "model": "auto"},
+                    },
+                }
+            )
+        )
+        m = load_models(cfg)["cursor-auto"]
+        assert isinstance(m.provider, CursorProvider)
+        assert m.model_id == "auto"
+        assert m.provider.api_key_env == "CURSOR_API_KEY"
+
     def test_explicit_models_section_with_inline_endpoint(self, tmp_path: Path) -> None:
         cfg = tmp_path / "agent-tester.yaml"
         cfg.write_text(
@@ -275,6 +293,38 @@ class TestQueryAsync:
         result = await _query_async(model, "hi")
         provider.async_stream_raw.assert_called_once()
         assert result == "streamed reply"
+
+    async def test_cursor_provider_skips_agent_loop_uses_cli(self) -> None:
+        provider = MagicMock(spec=CursorProvider)
+        provider.async_stream_raw = AsyncMock(
+            return_value={
+                "content": "cursor reply",
+                "tool_calls": None,
+                "input_tokens": 3,
+                "output_tokens": 4,
+            }
+        )
+        provider.workspace = None
+        executor = MagicMock(spec=ToolExecutor)
+        executor.workdir = "/tmp/cursor-wt"
+        model = Model(
+            name="m",
+            model_id="auto",
+            provider=provider,
+            tool_executor=executor,
+        )
+        with patch(
+            "agenttester.repl.run_agent_loop",
+            new_callable=AsyncMock,
+        ) as mock_loop:
+            result = await _query_async(model, "hi")
+        mock_loop.assert_not_called()
+        assert provider.workspace == "/tmp/cursor-wt"
+        provider.async_stream_raw.assert_called_once()
+        assert result == "cursor reply"
+        assert model.input_tokens == 3
+        assert model.output_tokens == 4
+        assert model.messages[-1] == {"role": "assistant", "content": "cursor reply"}
 
 
 # ---------------------------------------------------------------------------

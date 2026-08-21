@@ -19,6 +19,7 @@ from agenttester.config import (
 from agenttester.providers import (
     AnthropicProvider,
     BedrockProvider,
+    CursorProvider,
     OpenAICompatProvider,
 )
 
@@ -609,6 +610,26 @@ class TestLoadEvaluatorsAndEvalConfig:
         prov = evaluators[0].provider
         assert isinstance(prov, OpenAICompatProvider)
         assert prov.api_key_env == "MY_GH_TOKEN"
+
+    def test_cursor_provider(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  cursor:\n"
+            "    type: cursor\n"
+            "    binary: cursor-agent\n"
+            "    optimize_for: balanced\n"
+            "evaluators:\n"
+            "  - name: cursor-auto\n"
+            "    provider: cursor\n"
+            "    model: auto\n"
+        )
+        evaluators, _ = load_evaluators_and_eval_config(config_file)
+        prov = evaluators[0].provider
+        assert isinstance(prov, CursorProvider)
+        assert prov.api_key_env == "CURSOR_API_KEY"
+        assert prov.binary == "cursor-agent"
+        assert prov.optimize_for == "balanced"
 
 
 class TestGetReportsDir:

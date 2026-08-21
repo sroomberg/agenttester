@@ -41,6 +41,13 @@ agent-tester run "Refactor the auth module" --agents cursor,claude
 agent-tester run "Refactor the auth module" --agents cursor,codex
 ```
 
+For interactive multi-model sessions, configure the same Auto backend under `models:` with `type: cursor` (see [Cursor CLI authentication](#cursor-cli)):
+
+```bash
+agent-tester repl --workdir .
+# then compare @cursor-auto against other configured models
+```
+
 You can also pin a Cursor model (or any other CLI agent) as a separate config entry — useful when you want two Cursor variants, or to show that any agent tool works the same way:
 
 ```yaml
@@ -147,7 +154,7 @@ your-repo/.agent-tester/skills/style.md   # adds a new skill for this project
 
 ### Cursor CLI
 
-The `cursor` shell agent uses the Cursor CLI (`agent`), not the `providers:` block. Authenticate in one of these ways:
+The `cursor` shell agent (`agent-tester run`) and the `type: cursor` REPL provider both use the Cursor CLI (`agent`). Authenticate in one of these ways:
 
 1. **Interactive:** run `agent login` once on the host (stores credentials for later runs).
 2. **API key:** export `CURSOR_API_KEY` in the environment (recommended for CI / Docker / headless). AgentTester forwards the process environment to each agent; `docker-compose.yaml` also passes `CURSOR_API_KEY` through from the host.
@@ -156,6 +163,7 @@ The `cursor` shell agent uses the Cursor CLI (`agent`), not the `providers:` blo
 ```bash
 export CURSOR_API_KEY=your_api_key_here
 agent-tester run "…" --agents cursor,claude
+agent-tester repl --workdir .
 ```
 
 ```yaml
@@ -164,7 +172,23 @@ agents:
     command: "agent -p --force --trust {prompt}"
     env:
       CURSOR_API_KEY: "your_api_key_here"   # prefer env / Docker; do not commit
+
+providers:
+  cursor:
+    type: cursor
+    # api_key_env: CURSOR_API_KEY   # default
+    # binary: agent                 # or cursor-agent
+
+models:
+  cursor-auto:
+    provider: cursor
+    model: auto                   # Cursor Auto / Router (omit --model)
+  # cursor-composer:
+  #   provider: cursor
+  #   model: composer-2.5
 ```
+
+The REPL provider runs Cursor as a full agent (its own tools). With `--workdir`, each model still gets an isolated clone; Cursor is pointed at that clone via `--workspace`. `/reset` clears REPL history and the Cursor CLI chat session.
 
 ### Providers (evaluators and REPL models)
 
@@ -177,6 +201,7 @@ Define a `providers` block to share credentials across evaluators and REPL model
 | `bedrock` | AWS Bedrock Converse API | `BEDROCK_API_KEY` (api_key mode) | built-in; `pip install agenttester[aws]` for boto3 modes |
 | `azure` | Azure AI Foundry / Azure OpenAI Service | `AZURE_OPENAI_API_KEY` | built-in |
 | `vertex` | GCP Vertex AI (OpenAI-compatible endpoint) | `GOOGLE_API_KEY` | built-in |
+| `cursor` | Cursor CLI agent (Auto / Router or a pinned model) | `CURSOR_API_KEY` | built-in; requires [Cursor CLI](https://cursor.com/docs/cli/overview) on PATH |
 
 Override the default for any provider or evaluator with `api_key_env: MY_CUSTOM_VAR`.
 
@@ -257,6 +282,23 @@ providers:
 
 CLI tokens (Azure and GCP) are cached for 55 minutes to avoid extra subprocesses on every request.
 
+### Cursor (REPL)
+
+```yaml
+providers:
+  cursor:
+    type: cursor
+    # api_key_env: CURSOR_API_KEY
+    # binary: agent
+
+models:
+  cursor-auto:
+    provider: cursor
+    model: auto
+```
+
+`model: auto` (or `default` / `auto-smart`) uses Cursor Auto. Pin any other id from `agent models` the same way. See [Cursor CLI authentication](#cursor-cli).
+
 ### Evaluators and REPL models
 
 Providers are referenced by name in `evaluators:` (for diff review) and `models:` (for the REPL):
@@ -265,6 +307,8 @@ Providers are referenced by name in `evaluators:` (for diff review) and `models:
 providers:
   anthropic:
     type: anthropic
+  cursor:
+    type: cursor
   my-azure:
     type: azure
     endpoint: https://my-resource.openai.azure.com
@@ -287,6 +331,9 @@ evaluation:
   max_aggregate_tokens: 2000  # aggregate is summarized before injection if too long
 
 models:
+  cursor-auto:
+    provider: cursor
+    model: auto
   claude-bedrock:
     provider: bedrock-sso
     model: anthropic.claude-3-5-sonnet-20241022-v2:0

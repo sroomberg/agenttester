@@ -14,6 +14,7 @@ from .providers import (
     AnthropicProvider,
     AzureProvider,
     BedrockProvider,
+    CursorProvider,
     OpenAICompatProvider,
     Provider,
     VertexProvider,
@@ -244,6 +245,12 @@ def _build_named_provider(name: str, data: dict) -> Provider:
             endpoint=endpoint,
             api_key_env=data.get("api_key_env"),
             auth_method=data.get("auth_method", "api_key"),
+        )
+    if ptype == "cursor":
+        return CursorProvider(
+            api_key_env=data.get("api_key_env", "CURSOR_API_KEY"),
+            binary=data.get("binary", "agent"),
+            optimize_for=data.get("optimize_for"),
         )
     raise ValueError(f"Unknown provider type {ptype!r} for provider '{name}'")
 

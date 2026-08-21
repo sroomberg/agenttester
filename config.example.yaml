@@ -121,6 +121,19 @@ agents:
 #     aws_access_key_id_env: MY_KEY_ID     # explicit credential env vars
 #     aws_secret_access_key_env: MY_SECRET
 #     aws_session_token_env: MY_TOKEN      # optional
+#
+#   cursor:
+#     type: cursor
+#     # api_key_env: CURSOR_API_KEY        # default; or use `agent login`
+#     # binary: agent                     # or cursor-agent
+#
+# models:
+#   cursor-auto:
+#     provider: cursor
+#     model: auto                         # Cursor Auto / Router
+#   # cursor-composer:
+#   #   provider: cursor
+#   #   model: composer-2.5
 
 # --- LLM-based code quality evaluation ---
 # After each iteration, each evaluator independently reviews every agent's diff
