@@ -24,16 +24,23 @@ agents:
     timeout: 600
 
   # Cursor CLI (install: https://cursor.com/docs/cli/overview).
-  # Omitting --model uses Auto (the model router). Auth via `agent login`
-  # or CURSOR_API_KEY. Do not pass Cursor's -w/--worktree — AgentTester
-  # already creates an isolated worktree per agent.
+  # Omitting --model uses Auto (the model router). Compare against any
+  # other agent, e.g.:
+  #   agent-tester run "…" --agents cursor,claude
+  # Auth: export CURSOR_API_KEY, or `agent login`, or set env below.
+  # Do not pass Cursor's -w/--worktree — AgentTester already isolates
+  # each agent in its own worktree.
   cursor:
     command: "agent -p --force --trust {prompt}"
     host: localhost
     commit_style: auto
     timeout: 600
+    # env:
+    #   CURSOR_API_KEY: "..."   # prefer exporting in the shell / Docker
 
-  # Compare Auto against a pinned model (run both in one pass):
+  # Optional: pin a Cursor model (same CLI, static --model). Shows that
+  # any agent tool can be added the same way — not required for Auto vs
+  # Claude/Codex comparisons.
   #   agent-tester run "…" --agents cursor,cursor-composer
   # cursor-composer:
   #   command: "agent -p --force --trust --model composer-2.5 {prompt}"
@@ -41,7 +48,7 @@ agents:
   #   commit_style: auto
   #   timeout: 600
   #   env:
-  #     CURSOR_API_KEY: "..."   # optional; otherwise uses `agent login`
+  #     CURSOR_API_KEY: "..."
 
   # Example: agent running on a remote GPU box
   # remote-claude:
