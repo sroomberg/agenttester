@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- Add built-in `cursor` agent preset (`agent -p --force --trust`) using Cursor Auto when `--model` is omitted; document Auto vs pinned-model A/B comparison in README and `config.example.yaml`
+
 ## v1.4.5 — 2026-05-22
 - Fix: commit missing `token_accum` parameter in `run_agent_loop` that caused a TypeError when tool-use models ran queries
 

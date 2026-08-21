@@ -1,6 +1,6 @@
 # AgentTester configuration
 # Copy to agent-tester.yaml in your target repo.
-# Entries here override built-in presets (claude, aider, codex).
+# Entries here override built-in presets (claude, aider, codex, cursor).
 #
 # host: "localhost" (default) runs locally; set to "user@server" for SSH.
 
@@ -22,6 +22,26 @@ agents:
     host: localhost
     commit_style: auto
     timeout: 600
+
+  # Cursor CLI (install: https://cursor.com/docs/cli/overview).
+  # Omitting --model uses Auto (the model router). Auth via `agent login`
+  # or CURSOR_API_KEY. Do not pass Cursor's -w/--worktree — AgentTester
+  # already creates an isolated worktree per agent.
+  cursor:
+    command: "agent -p --force --trust {prompt}"
+    host: localhost
+    commit_style: auto
+    timeout: 600
+
+  # Compare Auto against a pinned model (run both in one pass):
+  #   agent-tester run "…" --agents cursor,cursor-composer
+  # cursor-composer:
+  #   command: "agent -p --force --trust --model composer-2.5 {prompt}"
+  #   host: localhost
+  #   commit_style: auto
+  #   timeout: 600
+  #   env:
+  #     CURSOR_API_KEY: "..."   # optional; otherwise uses `agent login`
 
   # Example: agent running on a remote GPU box
   # remote-claude:

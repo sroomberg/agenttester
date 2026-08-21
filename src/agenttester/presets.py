@@ -22,4 +22,12 @@ PRESETS: dict[str, dict] = {
         "commit_style": "auto",
         "timeout": 600,
     },
+    # Uses Cursor Auto (model router) when --model is omitted.
+    # Pin a static model with --model <id>; list ids via `agent models`.
+    # Do not pass Cursor's -w/--worktree — AgentTester already isolates worktrees.
+    "cursor": {
+        "command": "agent -p --force --trust {prompt}",
+        "commit_style": "auto",
+        "timeout": 600,
+    },
 }
