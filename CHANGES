@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.7.0 — 2026-08-21
+## v1.6.1 — 2026-08-21
 - REPL: show time to task completion when each model finishes, persist timings in the session, and include last/total duration in `/report`
 - `agent-tester run` reports: add a fastest-first time-to-completion ranking among successful agents
 
