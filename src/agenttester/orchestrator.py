@@ -362,7 +362,6 @@ class Orchestrator:
                         if budget is not None:
                             budget.add_usage(r.usage)
                             if budget.exceeded and pending:
-                                budget_stopped = True
                                 self.console.print(
                                     f"\n[yellow]Budget exceeded ({budget.summary()}); "
                                     "stopping remaining agents[/yellow]"
@@ -537,9 +536,7 @@ class Orchestrator:
                 )
 
             if budget is not None and budget.exceeded:
-                raise BudgetExceededError(
-                    f"Budget exceeded: {budget.summary()}"
-                )
+                raise BudgetExceededError(f"Budget exceeded: {budget.summary()}")
 
             if push and worktrees:
                 self.console.print("\n[bold]Pushing branches to remote…[/bold]")
