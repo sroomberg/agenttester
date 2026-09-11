@@ -35,4 +35,21 @@ PRESETS: dict[str, dict] = {
         "commit_style": "auto",
         "timeout": 600,
     },
+    # Pinned Cursor model variant (Composer). Same CLI as `cursor`; useful when
+    # comparing Auto vs a fixed Cursor model in one pass.
+    "cursor-composer": {
+        "command": (
+            "agent -p --force --trust --model composer-2.5"
+            " --output-format stream-json --stream-partial-output {prompt}"
+        ),
+        "commit_style": "auto",
+        "timeout": 600,
+    },
+    # Google Gemini CLI (https://github.com/google-gemini/gemini-cli).
+    # Auth via `gemini` login or GEMINI_API_KEY in the environment.
+    "gemini": {
+        "command": "gemini -p {prompt}",
+        "commit_style": "auto",
+        "timeout": 600,
+    },
 }

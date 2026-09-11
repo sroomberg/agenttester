@@ -137,7 +137,7 @@ class TestLoadConfigYaml:
     def test_missing_config_file_returns_presets(self) -> None:
         agents = load_config(Path("/nonexistent/config.yaml"))
         assert "claude" in agents
-        assert len(agents) == 4  # only presets
+        assert len(agents) == 6  # only presets
 
     def test_none_config_returns_presets(self) -> None:
         agents = load_config(None)
