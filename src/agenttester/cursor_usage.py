@@ -60,9 +60,7 @@ def usage_from_payload(data: dict[str, Any]) -> TokenUsage:
     cache_write = int(
         usage.get("cacheWriteTokens") or usage.get("cache_write_tokens") or 0
     )
-    output_tokens = int(
-        usage.get("outputTokens") or usage.get("output_tokens") or 0
-    )
+    output_tokens = int(usage.get("outputTokens") or usage.get("output_tokens") or 0)
 
     cost: float | None = None
     for key in ("costUsd", "cost_usd", "cost", "totalCostUsd", "total_cost_usd"):
