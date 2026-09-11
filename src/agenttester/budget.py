@@ -32,9 +32,7 @@ class RunBudget:
     def exceeded(self) -> bool:
         if self.max_tokens is not None and self.total_tokens > self.max_tokens:
             return True
-        return (
-            self.max_cost_usd is not None and self.total_cost_usd > self.max_cost_usd
-        )
+        return self.max_cost_usd is not None and self.total_cost_usd > self.max_cost_usd
 
     def check(self) -> None:
         """Raise if the budget has been exceeded."""
