@@ -19,7 +19,6 @@ from .baseline import (
     save_baseline,
 )
 from .config import AgentConfig, EvaluationConfig, EvaluatorConfig, _make_run_slug
-from .html_report import generate_html_report
 from .evaluator import (
     EvaluatorResult,
     aggregate_evaluations,
@@ -27,6 +26,7 @@ from .evaluator import (
     summarize_if_needed,
 )
 from .git_manager import GitManager, branch_name
+from .html_report import generate_html_report
 from .report import generate_report
 from .skills import load_skills
 
@@ -473,9 +473,7 @@ class Orchestrator:
         finally:
             if save_doc is not None and save_baseline_path is not None:
                 save_baseline(save_baseline_path, save_doc)
-                self.console.print(
-                    f"[dim]Baseline saved to {save_baseline_path}[/dim]"
-                )
+                self.console.print(f"[dim]Baseline saved to {save_baseline_path}[/dim]")
 
             if golden and golden_regression:
                 raise GoldenRegressionError(
