@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.0 — 2026-09-11
+- `agent-tester run`: capture Cursor CLI token usage from `--output-format stream-json` / `json` stdout; built-in `cursor` preset now enables stream-json with partial output for fair cost comparisons
+- Shared `TokenUsage` / `AgentRunMetrics` model for run reports (duration, success, tokens, optional cost); markdown reports show per-agent tokens (`n/a` when unavailable)
+- Extract Cursor usage parsing into `cursor_usage.py` (shared by shell `run` and REPL `type: cursor` provider)
+
 ## v1.6.1 — 2026-08-21
 - REPL: show time to task completion when each model finishes, persist timings in the session, and include last/total duration in `/report`
 - `agent-tester run` reports: add a fastest-first time-to-completion ranking among successful agents

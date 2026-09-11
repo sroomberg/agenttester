@@ -7,8 +7,8 @@ import json
 import os
 import shutil
 from collections.abc import Callable
-from typing import Any
 
+from ..cursor_usage import extract_text_from_event, usage_from_payload
 from .base import Provider
 
 # Models that mean "use Cursor Auto / Router" (omit --model or pass auto).
@@ -139,42 +139,6 @@ class CursorProvider(Provider):
         cmd.append(prompt)
         return cmd
 
-    @staticmethod
-    def _extract_text_from_event(event: dict[str, Any]) -> str:
-        if event.get("type") != "assistant":
-            return ""
-        message = event.get("message") or {}
-        content = message.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block.get("text") or "")
-                elif isinstance(block, str):
-                    parts.append(block)
-            return "".join(parts)
-        return ""
-
-    @staticmethod
-    def _usage_from_payload(data: dict[str, Any]) -> tuple[int, int]:
-        usage = data.get("usage") or {}
-        if not isinstance(usage, dict):
-            return 0, 0
-        # Prefer explicit fields; total input ≈ uncached + cache read + cache write
-        input_tokens = int(usage.get("inputTokens") or usage.get("input_tokens") or 0)
-        cache_read = int(
-            usage.get("cacheReadTokens") or usage.get("cache_read_tokens") or 0
-        )
-        cache_write = int(
-            usage.get("cacheWriteTokens") or usage.get("cache_write_tokens") or 0
-        )
-        output_tokens = int(
-            usage.get("outputTokens") or usage.get("output_tokens") or 0
-        )
-        return input_tokens + cache_read + cache_write, output_tokens
-
     async def _run_cli(
         self,
         model: str,
@@ -234,14 +198,14 @@ class CursorProvider(Provider):
                     has_ts = "timestamp_ms" in event
                     has_mc = "model_call_id" in event
                     if has_ts and not has_mc:
-                        chunk = self._extract_text_from_event(event)
+                        chunk = extract_text_from_event(event)
                         if chunk:
                             seen_partial = True
                             text_parts.append(chunk)
                             if on_chunk:
                                 on_chunk(chunk)
                     elif not has_ts and not has_mc and not seen_partial:
-                        chunk = self._extract_text_from_event(event)
+                        chunk = extract_text_from_event(event)
                         if chunk:
                             text_parts.append(chunk)
                             if on_chunk:
@@ -251,9 +215,9 @@ class CursorProvider(Provider):
                     sid = event.get("session_id")
                     if update_session and sid:
                         self.session_id = sid
-                    in_t, out_t = self._usage_from_payload(event)
-                    input_tokens += in_t
-                    output_tokens += out_t
+                    usage = usage_from_payload(event)
+                    input_tokens += usage.total_input
+                    output_tokens += usage.output
             stderr_b = await proc.stderr.read()
             stderr = stderr_b.decode("utf-8", errors="replace")
             code = await proc.wait()
@@ -272,7 +236,9 @@ class CursorProvider(Provider):
                     sid = data.get("session_id")
                     if update_session and sid:
                         self.session_id = sid
-                    input_tokens, output_tokens = self._usage_from_payload(data)
+                    usage = usage_from_payload(data)
+                    input_tokens = usage.total_input
+                    output_tokens = usage.output
 
         if code != 0:
             detail = stderr.strip() or f"exit code {code}"

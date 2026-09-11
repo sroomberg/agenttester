@@ -17,6 +17,12 @@ import rich.markup
 from rich.console import Console
 
 from .config import AgentConfig
+from .cursor_usage import (
+    CursorStreamParser,
+    detect_cursor_output_format,
+    parse_cursor_json_stdout,
+)
+from .metrics import AgentRunMetrics, TokenUsage
 
 
 @dataclass
@@ -29,6 +35,17 @@ class AgentResult:
     stdout: str
     stderr: str
     error: str | None = None
+    usage: TokenUsage | None = None
+
+    @property
+    def metrics(self) -> AgentRunMetrics:
+        """Shared run metrics (duration, success, tokens)."""
+        return AgentRunMetrics.from_agent_result(
+            exit_code=self.exit_code,
+            duration=self.duration,
+            error=self.error,
+            usage=self.usage,
+        )
 
 
 # ── helpers for remote execution ──────────────────────────────────────
@@ -88,6 +105,7 @@ def _make_result(
     stderr_lines: list[str],
     exit_code: int,
     error: str | None = None,
+    usage: TokenUsage | None = None,
 ) -> AgentResult:
     return AgentResult(
         agent_name=agent.name,
@@ -96,6 +114,7 @@ def _make_result(
         stdout="\n".join(stdout_lines),
         stderr="\n".join(stderr_lines),
         error=error,
+        usage=usage,
     )
 
 
@@ -166,9 +185,20 @@ async def _run_local(
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     last_output = [time.monotonic()]
+    cursor_format = detect_cursor_output_format(cmd)
+    cursor_parser = CursorStreamParser() if cursor_format == "stream-json" else None
 
     def _result(exit_code: int, error: str | None = None) -> AgentResult:
-        return _make_result(agent, start, stdout_lines, stderr_lines, exit_code, error)
+        usage: TokenUsage | None = None
+        if cursor_parser is not None and cursor_parser.usage.has_usage:
+            usage = cursor_parser.usage
+        elif cursor_format == "json" and stdout_lines:
+            _, usage = parse_cursor_json_stdout("\n".join(stdout_lines))
+            if not usage.has_usage:
+                usage = None
+        return _make_result(
+            agent, start, stdout_lines, stderr_lines, exit_code, error, usage
+        )
 
     proc: asyncio.subprocess.Process | None = None
     try:
@@ -252,6 +282,7 @@ async def _run_local(
                 prefix,
                 output_lock,
                 last_output,
+                cursor_parser=cursor_parser,
             )
         finally:
             forward_task.cancel()
@@ -285,9 +316,21 @@ async def _run_remote(
     prefix = f"[{color}]\\[{agent.name}][/{color}]"
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
+    cmd_preview, _, _ = _prepare_command(agent, prompt)
+    cursor_format = detect_cursor_output_format(cmd_preview)
+    cursor_parser = CursorStreamParser() if cursor_format == "stream-json" else None
 
     def _result(exit_code: int, error: str | None = None) -> AgentResult:
-        return _make_result(agent, start, stdout_lines, stderr_lines, exit_code, error)
+        usage: TokenUsage | None = None
+        if cursor_parser is not None and cursor_parser.usage.has_usage:
+            usage = cursor_parser.usage
+        elif cursor_format == "json" and stdout_lines:
+            _, usage = parse_cursor_json_stdout("\n".join(stdout_lines))
+            if not usage.has_usage:
+                usage = None
+        return _make_result(
+            agent, start, stdout_lines, stderr_lines, exit_code, error, usage
+        )
 
     try:
         # 1. Push worktree to remote
@@ -314,6 +357,7 @@ async def _run_remote(
             console,
             prefix,
             output_lock,
+            cursor_parser=cursor_parser,
         )
         exit_code = proc.returncode or 0
 
@@ -349,8 +393,11 @@ async def _stream_and_wait(
     prefix: str,
     output_lock: asyncio.Lock,
     last_output: list[float] | None = None,
+    cursor_parser: CursorStreamParser | None = None,
 ) -> None:
     """Stream stdout/stderr and wait, raising TimeoutError on expiry."""
+
+    stream_line_open = [False]
 
     async def _read(
         stream: asyncio.StreamReader | None,
@@ -365,15 +412,37 @@ async def _stream_and_wait(
                 break
             if last_output is not None:
                 last_output[0] = time.monotonic()
-            line = raw.decode("utf-8", errors="replace").rstrip()
+            line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
             lines.append(line)
-            # Escape Rich markup in agent output to avoid parse errors
+
+            if cursor_parser is not None and not is_err:
+                chunk = cursor_parser.process_line(line)
+                if chunk is None:
+                    continue
+                safe = rich.markup.escape(chunk)
+                async with output_lock:
+                    if not stream_line_open[0]:
+                        console.print(f"  {prefix} ", end="")
+                        stream_line_open[0] = True
+                    console.print(safe, end="")
+                continue
+
+            if stream_line_open[0]:
+                async with output_lock:
+                    console.print()
+                stream_line_open[0] = False
+
             safe = rich.markup.escape(line)
             async with output_lock:
                 if is_err:
                     console.print(f"  {prefix} [dim]{safe}[/dim]")
                 else:
                     console.print(f"  {prefix} {safe}")
+
+        if stream_line_open[0] and not is_err:
+            async with output_lock:
+                console.print()
+            stream_line_open[0] = False
 
     try:
         await asyncio.wait_for(

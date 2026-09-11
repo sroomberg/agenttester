@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import signal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -286,6 +287,56 @@ class TestRunAgentLocal:
 
         _, kwargs = mock_create.call_args
         assert kwargs["env"]["MY_KEY"] == "val"
+
+    @pytest.mark.asyncio
+    async def test_cursor_stream_json_captures_usage(
+        self, tmp_path: Path, console: Console, lock: asyncio.Lock
+    ) -> None:
+        agent = AgentConfig(
+            name="cursor",
+            command=(
+                "agent -p --output-format stream-json --stream-partial-output {prompt}"
+            ),
+            timeout=10,
+        )
+        events = [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "timestamp_ms": 1,
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "ok"}],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": "ok",
+                    "usage": {
+                        "inputTokens": 10,
+                        "cacheReadTokens": 5,
+                        "outputTokens": 20,
+                    },
+                }
+            ),
+        ]
+        stdout_lines = [f"{e}\n".encode() for e in events]
+        proc = _make_mock_proc(returncode=0, stdout_lines=stdout_lines)
+
+        with patch(
+            "agenttester.agent_runner.asyncio.create_subprocess_shell",
+            return_value=proc,
+        ):
+            result = await run_agent(agent, tmp_path, "go", console, "cyan", lock)
+
+        assert result.exit_code == 0
+        assert result.usage is not None
+        assert result.usage.total_input == 15
+        assert result.usage.output == 20
+        assert result.metrics.tokens is not None
+        assert result.metrics.success is True
 
 
 class TestRunAgentTimeout:

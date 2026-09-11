@@ -53,7 +53,9 @@ You can also pin a Cursor model (or any other CLI agent) as a separate config en
 ```yaml
 agents:
   cursor:
-    command: "agent -p --force --trust {prompt}"
+    command: >-
+      agent -p --force --trust
+      --output-format stream-json --stream-partial-output {prompt}
     commit_style: auto
     timeout: 600
     # Prefer exporting CURSOR_API_KEY in the shell / Docker env.
@@ -62,10 +64,14 @@ agents:
     #   CURSOR_API_KEY: "..."
 
   cursor-composer:
-    command: "agent -p --force --trust --model composer-2.5 {prompt}"
+    command: >-
+      agent -p --force --trust --model composer-2.5
+      --output-format stream-json --stream-partial-output {prompt}
     commit_style: auto
     timeout: 600
 ```
+
+The built-in `cursor` preset uses `--output-format stream-json` so `agent-tester run` reports include **token usage** (input/output and cache read/write when the CLI exposes them). Agents without structured CLI output show `n/a` in the comparison report. Custom Cursor agent entries should add the same flags (or `--output-format json` for non-streaming runs).
 
 ```bash
 agent-tester run "Refactor the auth module" --agents cursor,cursor-composer
@@ -169,7 +175,9 @@ agent-tester repl --workdir .
 ```yaml
 agents:
   cursor:
-    command: "agent -p --force --trust {prompt}"
+    command: >-
+      agent -p --force --trust
+      --output-format stream-json --stream-partial-output {prompt}
     env:
       CURSOR_API_KEY: "your_api_key_here"   # prefer env / Docker; do not commit
 
