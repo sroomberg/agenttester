@@ -11,7 +11,15 @@ from pathlib import Path
 from rich.console import Console
 
 from .agent_runner import AgentResult, run_agent
+from .baseline import (
+    BaselineFile,
+    compare_run_to_baseline,
+    load_baseline,
+    record_run_baseline,
+    save_baseline,
+)
 from .config import AgentConfig, EvaluationConfig, EvaluatorConfig, _make_run_slug
+from .html_report import generate_html_report
 from .evaluator import (
     EvaluatorResult,
     aggregate_evaluations,
@@ -23,6 +31,10 @@ from .report import generate_report
 from .skills import load_skills
 
 AGENT_COLORS = ["cyan", "green", "yellow", "magenta", "blue"]
+
+
+class GoldenRegressionError(RuntimeError):
+    """Raised when --golden detects a metric regression vs baseline."""
 
 
 async def _user_input_router(
@@ -214,6 +226,12 @@ class Orchestrator:
         push: bool = False,
         remote: str = "origin",
         pem_path: str | None = None,
+        baseline_path: Path | None = None,
+        save_baseline_path: Path | None = None,
+        write_html: bool = True,
+        golden: bool = False,
+        case_id: str | None = None,
+        suite_name: str | None = None,
     ) -> list[AgentResult]:
         """Execute a prompt across all agents and produce comparison reports.
 
@@ -238,6 +256,16 @@ class Orchestrator:
         run_name = run_name or _make_run_slug(prompt)
         base_ref = self.git.get_head_ref()
         eval_cfg = eval_config or EvaluationConfig()
+        baseline_doc: BaselineFile | None = None
+        if baseline_path is not None:
+            baseline_doc = load_baseline(baseline_path)
+        save_doc: BaselineFile | None = None
+        if save_baseline_path is not None:
+            if save_baseline_path.exists():
+                save_doc = load_baseline(save_baseline_path)
+            else:
+                save_doc = BaselineFile(suite=suite_name)
+        golden_regression = False
 
         self.console.print(
             f"[bold]Starting run [cyan]{run_name}[/cyan] "
@@ -343,6 +371,33 @@ class Orchestrator:
                         )
                         self.console.print(agg)
 
+                baseline_comparisons = None
+                if baseline_doc is not None:
+                    baseline_comparisons = compare_run_to_baseline(
+                        run_name,
+                        results,
+                        self.git,
+                        base_ref,
+                        baseline_doc,
+                    )
+                    if any(c.has_regression for c in baseline_comparisons):
+                        golden_regression = True
+                        self.console.print(
+                            "\n[yellow]Baseline regression detected "
+                            "(see report)[/yellow]"
+                        )
+
+                if save_doc is not None:
+                    record_run_baseline(
+                        save_doc,
+                        run_name,
+                        case_id=case_id,
+                        prompt=prompt,
+                        results=results,
+                        git=self.git,
+                        base_ref=base_ref,
+                    )
+
                 # Generate and save report
                 report = generate_report(
                     run_name,
@@ -353,6 +408,7 @@ class Orchestrator:
                     eval_results=eval_results_map or None,
                     aggregates=aggregates or None,
                     iteration=iteration,
+                    baseline_comparisons=baseline_comparisons,
                 )
                 self.reports_dir.mkdir(parents=True, exist_ok=True)
                 report_path = (
@@ -361,6 +417,23 @@ class Orchestrator:
                 )
                 report_path.write_text(report)
                 self.console.print(f"\n[bold]Report:[/bold] {report_path}")
+
+                if write_html:
+                    html_path = report_path.with_suffix(".html")
+                    html_path.write_text(
+                        generate_html_report(
+                            run_name,
+                            base_ref,
+                            prompt,
+                            results,
+                            self.git,
+                            eval_results=eval_results_map or None,
+                            aggregates=aggregates or None,
+                            iteration=iteration,
+                            baseline_comparisons=baseline_comparisons,
+                        )
+                    )
+                    self.console.print(f"[bold]HTML report:[/bold] {html_path}")
 
                 if not evaluators:
                     break
@@ -398,6 +471,17 @@ class Orchestrator:
                     agent_feedback[agent.name] = feedback
 
         finally:
+            if save_doc is not None and save_baseline_path is not None:
+                save_baseline(save_baseline_path, save_doc)
+                self.console.print(
+                    f"[dim]Baseline saved to {save_baseline_path}[/dim]"
+                )
+
+            if golden and golden_regression:
+                raise GoldenRegressionError(
+                    "Golden baseline comparison failed: one or more regressions"
+                )
+
             if push and worktrees:
                 self.console.print("\n[bold]Pushing branches to remote…[/bold]")
                 for agent_name in worktrees:

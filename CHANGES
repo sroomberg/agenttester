@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.0 — 2026-09-11
+- **Baseline / golden compare**: load a JSON baseline with `--baseline`, update it with `--save-baseline`, and optionally fail on regressions with `--golden` (duration >25%, tokens/cost >20%, or success→failure)
+- Baseline comparison section in markdown reports; suite YAML supports `baseline`, `save_baseline`, and `golden` keys
+- **HTML reports**: every `agent-tester run` (and suite run) writes a sibling `.html` report alongside the markdown file; pass `--no-html` to skip
+
 ## v1.8.0 — 2026-09-11
 - **YAML suites**: define benchmark cases, defaults, and optional matrix rows in a suite file (`examples/auth-suite.yaml`)
 - **`agent-tester suite validate`**: validate a suite and print the expanded run plan (cases × matrix)

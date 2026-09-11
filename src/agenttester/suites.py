@@ -42,6 +42,9 @@ class SuiteConfig:
     cases: list[SuiteCase]
     matrix: list[dict[str, Any]] = field(default_factory=list)
     source_path: Path | None = None
+    baseline: Path | None = None
+    save_baseline: Path | None = None
+    golden: bool = False
 
     def validate(self) -> None:
         if not self.cases:
@@ -113,12 +116,17 @@ def load_suite(path: Path) -> SuiteConfig:
             )
         )
     matrix = list(data.get("matrix") or [{}])
+    baseline_raw = data.get("baseline")
+    save_raw = data.get("save_baseline")
     suite = SuiteConfig(
         name=str(name),
         defaults=defaults,
         cases=cases,
         matrix=matrix,
         source_path=path,
+        baseline=Path(baseline_raw).expanduser() if baseline_raw else None,
+        save_baseline=Path(save_raw).expanduser() if save_raw else None,
+        golden=bool(data.get("golden", False)),
     )
     suite.validate()
     return suite
