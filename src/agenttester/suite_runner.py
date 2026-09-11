@@ -9,7 +9,7 @@ from rich.console import Console
 
 from .agent_runner import AgentResult
 from .config import get_reports_dir
-from .orchestrator import Orchestrator
+from .orchestrator import GoldenRegressionError, Orchestrator
 from .suites import (
     SuiteRunAttempt,
     SuiteRunSpec,
@@ -48,6 +48,10 @@ async def run_suite_spec(
     push: bool = False,
     remote: str = "origin",
     pem_path: str | None = None,
+    baseline_path: Path | None = None,
+    save_baseline_path: Path | None = None,
+    golden: bool = False,
+    suite_name: str | None = None,
 ) -> SuiteRunAttempt:
     """Run one suite spec, retrying up to *spec.retries* on failure."""
     max_attempts = spec.retries + 1
@@ -65,6 +69,24 @@ async def run_suite_spec(
                 push=push,
                 remote=remote,
                 pem_path=pem_path,
+                baseline_path=baseline_path,
+                save_baseline_path=save_baseline_path,
+                golden=golden,
+                case_id=spec.case_id,
+                suite_name=suite_name,
+            )
+        except GoldenRegressionError as e:
+            last_error = str(e)
+            report_path = (
+                orchestrator.reports_dir
+                / f"agenttester-report-{spec.run_name}-iter-1.md"
+            )
+            return SuiteRunAttempt(
+                spec=spec,
+                attempts=attempt,
+                success=False,
+                report_path=report_path if report_path.exists() else None,
+                error=last_error,
             )
         except RuntimeError as e:
             last_error = str(e)
@@ -142,6 +164,10 @@ async def run_suite_file(
             push=push,
             remote=remote,
             pem_path=pem_path,
+            baseline_path=suite.baseline,
+            save_baseline_path=suite.save_baseline,
+            golden=suite.golden,
+            suite_name=suite.name,
         )
         batch.attempts.append(attempt)
         if attempt.success:

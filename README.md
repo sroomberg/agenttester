@@ -496,6 +496,27 @@ agent-tester suite run my-suite.yaml --dry-run
 
 Suite runs reuse the same config discovery, reports directory, and orchestrator as `agent-tester run`.
 
+Optional baseline keys in a suite file:
+
+```yaml
+baseline: baselines/auth.json      # compare each run against stored metrics
+save_baseline: baselines/auth.json # update baseline after each run
+golden: true                       # fail when a regression is detected
+```
+
+## Baseline and HTML reports
+
+Save reference metrics after a run and compare later:
+
+```bash
+agent-tester run "Add tests" --agents cursor,claude --save-baseline baselines/main.json
+agent-tester run "Add tests" --agents cursor,claude --baseline baselines/main.json --golden
+```
+
+Regressions flagged: exit code worsening, duration >25% slower, token/cost usage >20% higher than baseline.
+
+Each run writes **markdown and HTML** reports in the project reports directory (`.html` sibling next to the `.md` file). Use `--no-html` to skip HTML generation.
+
 ## CLI Reference
 
 | Command | Description |
