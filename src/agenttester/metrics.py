@@ -65,9 +65,7 @@ def format_token_summary(usage: TokenUsage | None) -> str:
         return "n/a"
     parts = [f"{usage.total_input:,} in / {usage.output:,} out"]
     if usage.cache_read or usage.cache_write:
-        parts.append(
-            f"(cache {usage.cache_read:,} read, {usage.cache_write:,} write)"
-        )
+        parts.append(f"(cache {usage.cache_read:,} read, {usage.cache_write:,} write)")
     if usage.cost_usd is not None:
         parts.append(f"${usage.cost_usd:.4f}")
     return " ".join(parts)
@@ -82,8 +80,7 @@ def format_token_detail_lines(usage: TokenUsage | None) -> list[str]:
     ]
     if usage.cache_read or usage.cache_write:
         lines.append(
-            f"**Cache tokens**: {usage.cache_read:,} read, "
-            f"{usage.cache_write:,} write"
+            f"**Cache tokens**: {usage.cache_read:,} read, {usage.cache_write:,} write"
         )
     if usage.input and (usage.cache_read or usage.cache_write):
         lines.append(f"**Uncached input**: {usage.input:,}")
