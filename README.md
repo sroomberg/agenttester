@@ -542,6 +542,31 @@ Each run writes **markdown and HTML** reports in the project reports directory (
 
 Reports include a **failure taxonomy** table classifying each agent outcome (success, no changes, timeout, agent error, non-zero exit, worktree failure).
 
+## Budget and export
+
+Hard-stop when cumulative token or cost usage exceeds a limit (cancels remaining agents in a run, or remaining runs in a suite):
+
+```bash
+agent-tester run "Add tests" --agents cursor,claude --max-tokens 500000 --max-cost-usd 2.50
+agent-tester suite run my-suite.yaml --max-cost-usd 10
+```
+
+Suite YAML:
+
+```yaml
+budget:
+  max_tokens: 500000
+  max_cost_usd: 10.0
+```
+
+Export flat per-agent metrics to JSON or CSV:
+
+```bash
+agent-tester run "Add tests" --agents cursor,claude \
+  --export-json results.json --export-csv results.csv
+agent-tester suite run my-suite.yaml --export-json suite-results.json
+```
+
 ## CLI Reference
 
 | Command | Description |

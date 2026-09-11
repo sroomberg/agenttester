@@ -585,7 +585,6 @@ def list_agents(
     all_agents = load_config(config)
     console.print("[bold]Available agents:[/bold]\n")
     for name, agent in sorted(all_agents.items()):
-<<<<<<< HEAD
         preset_names = (
             "claude",
             "aider",
@@ -594,9 +593,6 @@ def list_agents(
             "cursor-composer",
             "gemini",
         )
-=======
-        preset_names = ("claude", "aider", "codex", "cursor", "cursor-composer", "gemini")
->>>>>>> 2b259d9 (Add presets, failure taxonomy, serve/notify docs, secret-broker skill (v1.10.0))
         tag = "[dim](preset)[/dim]" if name in preset_names else ""
         console.print(f"  [bold]{name}[/bold] {tag}")
         console.print(f"    command: [dim]{agent.command}[/dim]")
