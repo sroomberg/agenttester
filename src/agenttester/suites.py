@@ -146,7 +146,7 @@ def _merge_optional_int(*layers: int | None) -> int | None:
 
 
 def expand_suite(suite: SuiteConfig) -> list[SuiteRunSpec]:
-    """Expand cases × matrix rows into concrete run specifications."""
+    """Expand cases x matrix rows into concrete run specifications."""
     matrix_rows = suite.matrix if suite.matrix else [{}]
     specs: list[SuiteRunSpec] = []
     for matrix_index, row in enumerate(matrix_rows):
@@ -237,4 +237,3 @@ def format_suite_plan(specs: list[SuiteRunSpec]) -> str:
             prompt_preview += "…"
         lines.append(f"     prompt: {prompt_preview}")
     return "\n".join(lines)
-
