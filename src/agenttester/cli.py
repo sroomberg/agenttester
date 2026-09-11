@@ -585,7 +585,7 @@ def list_agents(
     all_agents = load_config(config)
     console.print("[bold]Available agents:[/bold]\n")
     for name, agent in sorted(all_agents.items()):
-        preset_names = ("claude", "aider", "codex", "cursor")
+        preset_names = ("claude", "aider", "codex", "cursor", "cursor-composer", "gemini")
         tag = "[dim](preset)[/dim]" if name in preset_names else ""
         console.print(f"  [bold]{name}[/bold] {tag}")
         console.print(f"    command: [dim]{agent.command}[/dim]")

@@ -27,7 +27,7 @@ uv pip install -e ".[dev]"
 
 ## Configuration
 
-Copy `config.example.yaml` to `agent-tester.yaml` (or `agent-tester.yml`) in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, `codex`, and `cursor`.
+Copy `config.example.yaml` to `agent-tester.yaml` (or `agent-tester.yml`) in your target repo to customize agents. Built-in presets are available for `claude`, `aider`, `codex`, `cursor`, `cursor-composer`, and `gemini`.
 
 ### Comparing Cursor Auto to another agent
 
@@ -141,6 +141,7 @@ Skills are markdown instruction files prepended to every agent prompt. AgentTest
 | `testing.md` | Run the test suite and linter after making changes; don't mark complete until tests pass |
 | `git.md` | Permitted git operations; never push to the default branch |
 | `bash.md` | Permitted bash operations scoped to the worktree |
+| `secret-broker.md` | Handle credentials via env vars / vault; never commit or log secrets |
 
 Override any built-in or add new skills at two levels:
 
@@ -410,6 +411,28 @@ agent-tester watch --session <SESSION_ID> --model <MODEL_NAME>
 
 The watcher tail-follows the model's event log and renders each event with Rich as it arrives. Open one watcher per model while keeping the main REPL for sending prompts.
 
+### Serve and notify (external agent callbacks)
+
+Run a lightweight HTTP receiver in one terminal:
+
+```bash
+agent-tester serve              # default http://127.0.0.1:8765
+agent-tester serve --port 9000
+```
+
+Endpoints:
+
+- `GET /health` — liveness check (`{"status": "ok"}`)
+- `POST /result` — JSON body `{"model": "name", "result": "summary", "branch": "optional"}`; rendered as a Rich panel in the serve terminal
+
+In another terminal, start the REPL with `--notify-url` pointing at the serve instance. Models gain a `notify` tool (only when the URL is set) to POST their final summary back to the server:
+
+```bash
+agent-tester repl --workdir . --notify-url http://127.0.0.1:8765
+```
+
+The `notify` tool is absent from the tool list when `--notify-url` is not configured.
+
 ### Tool use and branches
 
 Pass `--workdir <dir>` to enable an agent loop for OpenAI-compatible and Anthropic models. Each model gains access to `bash`, `read_file`, `write_file`, `git_clone`, `git_commit`, and `git_push` tools. When `--workdir` is a git repo, each model works in its own clone under `.agenttester/worktrees/<session-id>/` on a dedicated branch.
@@ -517,6 +540,8 @@ Regressions flagged: exit code worsening, duration >25% slower, token/cost usage
 
 Each run writes **markdown and HTML** reports in the project reports directory (`.html` sibling next to the `.md` file). Use `--no-html` to skip HTML generation.
 
+Reports include a **failure taxonomy** table classifying each agent outcome (success, no changes, timeout, agent error, non-zero exit, worktree failure).
+
 ## CLI Reference
 
 | Command | Description |
@@ -528,6 +553,7 @@ Each run writes **markdown and HTML** reports in the project reports directory (
 | `agent-tester sessions` | List previous REPL sessions |
 | `agent-tester watch` | Stream a model's event log from a running or past session |
 | `agent-tester cleanup` | Interactively prune agenttester branches from a repo |
+| `agent-tester serve` | HTTP receiver for agent completion callbacks (`POST /result`) |
 | `agent-tester agents` | List configured agents and built-in presets |
 
 Use `--help` on any subcommand for full options.
