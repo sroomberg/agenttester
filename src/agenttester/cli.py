@@ -511,7 +511,7 @@ def suite_run(
         typer.Option("--pem", help="SSH PEM key path for git push authentication"),
     ] = None,
 ) -> None:
-    """Run a YAML suite (cases × matrix) with per-run retries."""
+    """Run a YAML suite (cases x matrix) with per-run retries."""
     if not suite_file.exists():
         console.print(f"[red]Suite file not found: {suite_file}[/red]")
         raise typer.Exit(1)

@@ -79,8 +79,7 @@ async def run_suite_spec(
 
         failed = [r for r in results if r.exit_code != 0 or r.error]
         report_path = (
-            orchestrator.reports_dir
-            / f"agenttester-report-{spec.run_name}-iter-1.md"
+            orchestrator.reports_dir / f"agenttester-report-{spec.run_name}-iter-1.md"
         )
         if not failed:
             return SuiteRunAttempt(
@@ -133,8 +132,7 @@ async def run_suite_file(
 
     for i, spec in enumerate(specs, 1):
         console.print(
-            f"\n[bold]Suite {suite.name} — run {i}/{len(specs)} "
-            f"({spec.case_id})[/bold]"
+            f"\n[bold]Suite {suite.name} — run {i}/{len(specs)} ({spec.case_id})[/bold]"
         )
         attempt = await run_suite_spec(
             spec,
@@ -148,7 +146,7 @@ async def run_suite_file(
         batch.attempts.append(attempt)
         if attempt.success:
             console.print(
-                f"  [green]✓[/green] passed"
+                "  [green]✓[/green] passed"
                 + (f" (attempt {attempt.attempts})" if attempt.attempts > 1 else "")
             )
         else:
