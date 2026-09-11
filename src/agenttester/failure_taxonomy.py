@@ -73,13 +73,16 @@ def format_taxonomy_markdown(
     """Render failure taxonomy summary as markdown lines."""
     if not results:
         return []
-    lines = ["## Failure taxonomy", "", "| Agent | Category | Detail |", "|-------|----------|--------|"]
+    lines = [
+        "## Failure taxonomy",
+        "",
+        "| Agent | Category | Detail |",
+        "|-------|----------|--------|",
+    ]
     for result in results:
         stats = git.get_diff_stats(result.agent_name, run_name, base_ref)
         classification = classify_agent_result(result, stats)
         detail = classification.description.replace("|", "\\|")
-        lines.append(
-            f"| {result.agent_name} | {classification.label} | {detail} |"
-        )
+        lines.append(f"| {result.agent_name} | {classification.label} | {detail} |")
     lines.append("")
     return lines
