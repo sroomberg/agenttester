@@ -466,12 +466,44 @@ REPO_PATH=/path/to/repo docker compose run --rm agent-tester repl \
   --workdir /repo --config /repo/agent-tester.yaml
 ```
 
+## YAML suites (batch benchmarks)
+
+Define repeatable comparison suites in YAML and run them with matrix variants and per-run retries:
+
+```yaml
+name: auth-comparison
+defaults:
+  agents: [cursor, claude]
+  retries: 1
+cases:
+  - id: refactor-auth
+    prompt: Refactor the authentication module.
+  - id: add-tests
+    prompt: Add unit tests for authentication.
+matrix:
+  - {}
+  - agents: [cursor, codex]
+    retries: 0
+```
+
+Each **case** × each **matrix row** becomes one orchestrated run. Matrix rows override `agents`, `retries`, and `timeout` for that variant. See `examples/auth-suite.yaml`.
+
+```bash
+agent-tester suite validate my-suite.yaml   # check + print expanded plan
+agent-tester suite run my-suite.yaml        # execute all runs
+agent-tester suite run my-suite.yaml --dry-run
+```
+
+Suite runs reuse the same config discovery, reports directory, and orchestrator as `agent-tester run`.
+
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `agent-tester` / `agent-tester repl` | Open the interactive REPL |
 | `agent-tester run` | Run shell agents against a prompt in parallel |
+| `agent-tester suite validate` | Validate a suite YAML and show the expanded matrix plan |
+| `agent-tester suite run` | Run a YAML suite (cases × matrix) with retries |
 | `agent-tester sessions` | List previous REPL sessions |
 | `agent-tester watch` | Stream a model's event log from a running or past session |
 | `agent-tester cleanup` | Interactively prune agenttester branches from a repo |
