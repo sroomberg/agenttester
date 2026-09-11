@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from .agent_runner import AgentResult
 from .evaluator import EvaluatorResult
 from .git_manager import GitManager, branch_name
+from .metrics import format_token_detail_lines, format_token_summary
 
 
 def generate_report(
@@ -36,8 +37,8 @@ def generate_report(
         "",
         "## Summary",
         "",
-        "| Agent | Status | Duration | Files | Insertions | Deletions |",
-        "|-------|--------|----------|-------|------------|-----------|",
+        "| Agent | Status | Duration | Tokens | Files | Insertions | Deletions |",
+        "|-------|--------|----------|--------|-------|------------|-----------|",
     ]
 
     for r in results:
@@ -45,9 +46,10 @@ def generate_report(
         status = "✅" if r.exit_code == 0 else "❌"
         if r.error:
             status += f" {r.error}"
+        tokens = format_token_summary(r.usage)
         lines.append(
             f"| {r.agent_name} | {status} | {r.duration:.1f}s "
-            f"| {stats.files_changed} | +{stats.insertions} "
+            f"| {tokens} | {stats.files_changed} | +{stats.insertions} "
             f"| -{stats.deletions} |"
         )
 
@@ -80,6 +82,7 @@ def generate_report(
                 f"**Exit code**: {r.exit_code}",
             ]
         )
+        lines.extend(format_token_detail_lines(r.usage))
 
         if r.error:
             lines.append(f"**Error**: {r.error}")

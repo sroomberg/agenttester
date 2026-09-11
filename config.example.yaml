@@ -30,8 +30,14 @@ agents:
   # Auth: export CURSOR_API_KEY, or `agent login`, or set env below.
   # Do not pass Cursor's -w/--worktree — AgentTester already isolates
   # each agent in its own worktree.
+  #
+  # Token usage: include --output-format stream-json (recommended) or json
+  # so AgentTester can parse usage from the CLI and show tokens in run
+  # reports. The built-in preset adds stream-json + --stream-partial-output.
   cursor:
-    command: "agent -p --force --trust {prompt}"
+    command: >-
+      agent -p --force --trust
+      --output-format stream-json --stream-partial-output {prompt}
     host: localhost
     commit_style: auto
     timeout: 600
@@ -43,7 +49,9 @@ agents:
   # Claude/Codex comparisons.
   #   agent-tester run "…" --agents cursor,cursor-composer
   # cursor-composer:
-  #   command: "agent -p --force --trust --model composer-2.5 {prompt}"
+  #   command: >-
+  #     agent -p --force --trust --model composer-2.5
+  #     --output-format stream-json --stream-partial-output {prompt}
   #   host: localhost
   #   commit_style: auto
   #   timeout: 600
