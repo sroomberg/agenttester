@@ -18,6 +18,7 @@ from .baseline import (
     record_run_baseline,
     save_baseline,
 )
+from .budget import BudgetExceededError, RunBudget
 from .config import AgentConfig, EvaluationConfig, EvaluatorConfig, _make_run_slug
 from .evaluator import (
     EvaluatorResult,
@@ -25,6 +26,7 @@ from .evaluator import (
     evaluate_diff,
     summarize_if_needed,
 )
+from .export import ExportDocument, append_run_to_document
 from .git_manager import GitManager, branch_name
 from .html_report import generate_html_report
 from .report import generate_report
@@ -232,6 +234,8 @@ class Orchestrator:
         golden: bool = False,
         case_id: str | None = None,
         suite_name: str | None = None,
+        budget: RunBudget | None = None,
+        export_doc: ExportDocument | None = None,
     ) -> list[AgentResult]:
         """Execute a prompt across all agents and produce comparison reports.
 
@@ -316,37 +320,89 @@ class Orchestrator:
                     )
                 )
 
-                tasks = [
-                    self._run_one(
-                        agent,
-                        AGENT_COLORS[i % len(AGENT_COLORS)],
-                        worktrees,
-                        run_name,
-                        prompt,
-                        agent_feedback,
-                        iteration,
-                        output_lock,
-                        input_queues,
+                task_map: dict[asyncio.Task, AgentConfig] = {}
+                for i, agent in enumerate(active_agents):
+                    task = asyncio.create_task(
+                        self._run_one(
+                            agent,
+                            AGENT_COLORS[i % len(AGENT_COLORS)],
+                            worktrees,
+                            run_name,
+                            prompt,
+                            agent_feedback,
+                            iteration,
+                            output_lock,
+                            input_queues,
+                        )
                     )
-                    for i, agent in enumerate(active_agents)
-                ]
-                raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+                    task_map[task] = agent
+
+                pending = set(task_map)
+                results: list[AgentResult] = []
+                while pending:
+                    done, pending = await asyncio.wait(
+                        pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in done:
+                        agent = task_map[task]
+                        try:
+                            r = task.result()
+                        except asyncio.CancelledError:
+                            r = AgentResult(
+                                agent.name,
+                                -1,
+                                0.0,
+                                "",
+                                "",
+                                "Cancelled (budget exceeded)",
+                            )
+                        except BaseException as e:
+                            r = AgentResult(agent.name, -1, 0.0, "", "", str(e))
+                        results.append(r)
+                        if budget is not None:
+                            budget.add_usage(r.usage)
+                            if budget.exceeded and pending:
+                                budget_stopped = True
+                                self.console.print(
+                                    f"\n[yellow]Budget exceeded ({budget.summary()}); "
+                                    "stopping remaining agents[/yellow]"
+                                )
+                                for other in pending:
+                                    other.cancel()
+                                for other in pending:
+                                    other_agent = task_map[other]
+                                    with contextlib.suppress(asyncio.CancelledError):
+                                        await other
+                                    results.append(
+                                        AgentResult(
+                                            other_agent.name,
+                                            -1,
+                                            0.0,
+                                            "",
+                                            "",
+                                            "Cancelled (budget exceeded)",
+                                        )
+                                    )
+                                pending.clear()
+                                break
 
                 done_event.set()
                 router_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await router_task
 
-                results: list[AgentResult] = []
-                for i, r in enumerate(raw_results):
-                    if isinstance(r, BaseException):
-                        results.append(
-                            AgentResult(active_agents[i].name, -1, 0.0, "", "", str(r))
-                        )
-                    else:
-                        results.append(r)
-
                 last_results = results
+
+                if export_doc is not None:
+                    append_run_to_document(
+                        export_doc,
+                        run_name=run_name,
+                        results=results,
+                        git=self.git,
+                        base_ref=base_ref,
+                        suite_name=suite_name,
+                        case_id=case_id,
+                    )
 
                 self.console.print(f"\n[bold]Iteration {iteration} Results:[/bold]")
                 for r in results:
@@ -478,6 +534,11 @@ class Orchestrator:
             if golden and golden_regression:
                 raise GoldenRegressionError(
                     "Golden baseline comparison failed: one or more regressions"
+                )
+
+            if budget is not None and budget.exceeded:
+                raise BudgetExceededError(
+                    f"Budget exceeded: {budget.summary()}"
                 )
 
             if push and worktrees:

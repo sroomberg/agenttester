@@ -73,26 +73,16 @@ def format_taxonomy_markdown(
     """Render failure taxonomy summary as markdown lines."""
     if not results:
         return []
-<<<<<<< HEAD
     lines = [
         "## Failure taxonomy",
         "",
         "| Agent | Category | Detail |",
         "|-------|----------|--------|",
     ]
-=======
-    lines = ["## Failure taxonomy", "", "| Agent | Category | Detail |", "|-------|----------|--------|"]
->>>>>>> 2b259d9 (Add presets, failure taxonomy, serve/notify docs, secret-broker skill (v1.10.0))
     for result in results:
         stats = git.get_diff_stats(result.agent_name, run_name, base_ref)
         classification = classify_agent_result(result, stats)
         detail = classification.description.replace("|", "\\|")
-<<<<<<< HEAD
         lines.append(f"| {result.agent_name} | {classification.label} | {detail} |")
-=======
-        lines.append(
-            f"| {result.agent_name} | {classification.label} | {detail} |"
-        )
->>>>>>> 2b259d9 (Add presets, failure taxonomy, serve/notify docs, secret-broker skill (v1.10.0))
     lines.append("")
     return lines
