@@ -9,6 +9,7 @@ from typing import Any
 
 from .agent_runner import AgentResult
 from .git_manager import DiffStats, GitManager
+
 BASELINE_VERSION = 1
 
 
@@ -70,8 +71,7 @@ class BaselineFile:
                     "case_id": run.case_id,
                     "prompt": run.prompt,
                     "agents": {
-                        agent: asdict(metrics)
-                        for agent, metrics in run.agents.items()
+                        agent: asdict(metrics) for agent, metrics in run.agents.items()
                     },
                 }
                 for run_name, run in self.runs.items()
@@ -187,20 +187,22 @@ def compare_run_to_baseline(
             )
             continue
         base = ref.agents[result.agent_name]
+        exit_regression = base.exit_code == 0 and current.exit_code != 0
+        duration_regression = _regression_duration(base.duration, current.duration)
         deltas = [
             ComparisonDelta(
                 "exit_code",
                 base.exit_code,
                 current.exit_code,
-                regression=base.exit_code == 0 and current.exit_code != 0,
-                note="success → failure" if base.exit_code == 0 and current.exit_code != 0 else "",
+                regression=exit_regression,
+                note="success → failure" if exit_regression else "",
             ),
             ComparisonDelta(
                 "duration",
                 base.duration,
                 current.duration,
-                regression=_regression_duration(base.duration, current.duration),
-                note=">25% slower" if _regression_duration(base.duration, current.duration) else "",
+                regression=duration_regression,
+                note=">25% slower" if duration_regression else "",
             ),
             ComparisonDelta(
                 "tokens_in",
@@ -254,8 +256,7 @@ def format_comparison_markdown(comparisons: list[AgentComparison]) -> list[str]:
             lines.append(f"- **{comp.agent_name}**: within baseline")
             continue
         detail = ", ".join(
-            f"{d.field} {d.baseline}→{d.current}"
-            + (f" ({d.note})" if d.note else "")
+            f"{d.field} {d.baseline}→{d.current}" + (f" ({d.note})" if d.note else "")
             for d in flags
         )
         lines.append(f"- **{comp.agent_name}**: ⚠️ regression — {detail}")

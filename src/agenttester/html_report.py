@@ -53,9 +53,10 @@ def generate_html_report(
     for r in results:
         stats = git.get_diff_stats(r.agent_name, run_name, base_ref)
         files = "".join(f"<li><code>{_esc(f)}</code></li>" for f in stats.changed_files)
+        branch_ref = _esc(branch_name(r.agent_name, run_name))
         section = [
             f"<h2>{_esc(r.agent_name)}</h2>",
-            f"<p><strong>Branch:</strong> <code>{_esc(branch_name(r.agent_name, run_name))}</code></p>",
+            f"<p><strong>Branch:</strong> <code>{branch_ref}</code></p>",
             f"<p><strong>Duration:</strong> {r.duration:.1f}s</p>",
             f"<p><strong>Exit code:</strong> {r.exit_code}</p>",
         ]
@@ -81,9 +82,7 @@ def generate_html_report(
     if baseline_comparisons:
         md_lines = format_comparison_markdown(baseline_comparisons)
         baseline_block = (
-            "<h2>Baseline comparison</h2><pre>"
-            + _esc("\n".join(md_lines))
-            + "</pre>"
+            "<h2>Baseline comparison</h2><pre>" + _esc("\n".join(md_lines)) + "</pre>"
         )
 
     return f"""<!DOCTYPE html>
