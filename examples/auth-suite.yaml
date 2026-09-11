@@ -1,0 +1,15 @@
+# Example AgentTester suite — copy and adapt for your repo.
+name: auth-comparison
+defaults:
+  agents: [cursor, claude]
+  retries: 1
+  timeout: 600
+cases:
+  - id: refactor-auth
+    prompt: Refactor the authentication module for clarity without changing behavior.
+  - id: add-tests
+    prompt: Add unit tests for the authentication module.
+matrix:
+  - {}
+  - agents: [cursor, codex]
+    retries: 0

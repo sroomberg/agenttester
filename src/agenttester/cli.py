@@ -24,6 +24,8 @@ from .orchestrator import Orchestrator
 from .repl import run_repl
 from .server import run_server
 from .session import ReplSession
+from .suite_runner import run_suite_file
+from .suites import expand_suite, format_suite_plan, load_suite
 from .watcher import run_watcher
 
 app = typer.Typer(
@@ -444,6 +446,100 @@ def list_sessions(
         console.print(f"{date}  {start}  {end}  {s.id}")
         for b in s.branches:
             console.print(f"    {b.ljust(max_branch_len)}  {_status(b)}")
+
+
+suite_app = typer.Typer(
+    name="suite",
+    help="Run YAML-defined benchmark suites with matrix and retries.",
+)
+app.add_typer(suite_app, name="suite")
+
+
+@suite_app.command("validate")
+def suite_validate(
+    suite_file: Annotated[
+        Path,
+        typer.Argument(help="Path to suite YAML file"),
+    ],
+) -> None:
+    """Validate a suite file and print the expanded run plan."""
+    try:
+        suite = load_suite(suite_file)
+        specs = expand_suite(suite)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+    console.print(f"[green]Valid suite:[/green] {suite.name} ({len(specs)} run(s))")
+    console.print(format_suite_plan(specs))
+
+
+@suite_app.command("run")
+def suite_run(
+    suite_file: Annotated[
+        Path,
+        typer.Argument(help="Path to suite YAML file"),
+    ],
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to config YAML file"),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Print expanded matrix plan without running agents",
+        ),
+    ] = False,
+    keep_worktrees: Annotated[
+        bool,
+        typer.Option("--keep-worktrees", help="Keep worktrees after each run"),
+    ] = False,
+    repo: Annotated[
+        Path | None,
+        typer.Option("--repo", "-r", help="Path to target git repo (default: cwd)"),
+    ] = None,
+    push: Annotated[
+        bool,
+        typer.Option("--push", help="Push agent branches to remote after each run"),
+    ] = False,
+    remote: Annotated[
+        str,
+        typer.Option("--remote", help="Git remote to push to"),
+    ] = "origin",
+    pem: Annotated[
+        str | None,
+        typer.Option("--pem", help="SSH PEM key path for git push authentication"),
+    ] = None,
+) -> None:
+    """Run a YAML suite (cases × matrix) with per-run retries."""
+    if not suite_file.exists():
+        console.print(f"[red]Suite file not found: {suite_file}[/red]")
+        raise typer.Exit(1)
+
+    repo_path = _find_git_root(repo or Path.cwd())
+    try:
+        batch = asyncio.run(
+            run_suite_file(
+                suite_file,
+                repo_path,
+                console,
+                config_path=config,
+                keep_worktrees=keep_worktrees,
+                push=push,
+                remote=remote,
+                pem_path=pem,
+                dry_run=dry_run,
+            )
+        )
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+
+    if dry_run:
+        raise typer.Exit(0)
+
+    if batch.failed:
+        raise typer.Exit(1)
 
 
 @app.command("agents")
