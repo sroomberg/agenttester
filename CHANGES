@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.10.0 — 2026-09-11
+- Built-in presets: `cursor-composer` (pinned Composer model) and `gemini` (Google Gemini CLI)
+- **Failure taxonomy** in markdown/HTML reports: classify each agent as success, no changes, timeout, agent error, non-zero exit, or worktree failure
+- README: document `agent-tester serve`, `repl --notify-url`, and the `notify` tool consistently with the implementation
+- Built-in `secret-broker.md` skill (markdown only): guidance for handling credentials without committing secrets
+
 ## v1.9.0 — 2026-09-11
 - **Baseline / golden compare**: load a JSON baseline with `--baseline`, update it with `--save-baseline`, and optionally fail on regressions with `--golden` (duration >25%, tokens/cost >20%, or success→failure)
 - Baseline comparison section in markdown reports; suite YAML supports `baseline`, `save_baseline`, and `golden` keys

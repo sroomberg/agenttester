@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from .agent_runner import AgentResult
 from .baseline import AgentComparison, format_comparison_markdown
 from .evaluator import EvaluatorResult
+from .failure_taxonomy import classify_agent_result, format_taxonomy_markdown
 from .git_manager import GitManager, branch_name
 from .metrics import format_token_summary
 
@@ -33,10 +34,11 @@ def generate_html_report(
     rows: list[str] = []
     for r in results:
         stats = git.get_diff_stats(r.agent_name, run_name, base_ref)
-        status = "pass" if r.exit_code == 0 and not r.error else "fail"
-        status_label = "✅" if status == "pass" else "❌"
-        if r.error:
-            status_label += f" {_esc(r.error)}"
+        classification = classify_agent_result(r, stats)
+        status = "pass" if classification.category == "success" else "fail"
+        status_label = (
+            f"{'✅' if status == 'pass' else '❌'} {_esc(classification.label)}"
+        )
         rows.append(
             "<tr>"
             f"<td>{_esc(r.agent_name)}</td>"
@@ -85,6 +87,12 @@ def generate_html_report(
             "<h2>Baseline comparison</h2><pre>" + _esc("\n".join(md_lines)) + "</pre>"
         )
 
+    taxonomy_block = (
+        "<h2>Failure taxonomy</h2><pre>"
+        + _esc("\n".join(format_taxonomy_markdown(results, git, run_name, base_ref)))
+        + "</pre>"
+    )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -113,7 +121,7 @@ def generate_html_report(
   <table>
     <thead>
       <tr>
-        <th>Agent</th><th>Status</th><th>Duration</th><th>Tokens</th>
+        <th>Agent</th><th>Outcome</th><th>Duration</th><th>Tokens</th>
         <th>Files</th><th>+</th><th>-</th>
       </tr>
     </thead>
@@ -122,6 +130,7 @@ def generate_html_report(
     </tbody>
   </table>
   {baseline_block}
+  {taxonomy_block}
   {"".join(agent_sections)}
 </body>
 </html>
