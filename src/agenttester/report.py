@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .agent_runner import AgentResult
+from .baseline import AgentComparison, format_comparison_markdown
 from .evaluator import EvaluatorResult
 from .git_manager import GitManager, branch_name
 from .metrics import format_token_detail_lines, format_token_summary
@@ -19,6 +20,7 @@ def generate_report(
     eval_results: dict[str, list[EvaluatorResult]] | None = None,
     aggregates: dict[str, str] | None = None,
     iteration: int = 1,
+    baseline_comparisons: list[AgentComparison] | None = None,
 ) -> str:
     """Build a markdown report comparing agent results."""
     lines: list[str] = [
@@ -66,6 +68,9 @@ def generate_report(
                 + ", ".join(f"{r.agent_name} ({r.duration:.1f}s)" for r in finished),
             ]
         )
+
+    if baseline_comparisons:
+        lines.extend(format_comparison_markdown(baseline_comparisons))
 
     lines.append("")
 
