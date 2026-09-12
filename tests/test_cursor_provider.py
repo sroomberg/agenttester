@@ -10,20 +10,6 @@ import pytest
 from agenttester.providers.cursor import CursorProvider
 
 
-def test_usage_sums_cache_fields() -> None:
-    p = CursorProvider()
-    assert p._usage_from_payload(
-        {
-            "usage": {
-                "inputTokens": 7,
-                "cacheReadTokens": 100,
-                "cacheWriteTokens": 20,
-                "outputTokens": 50,
-            }
-        }
-    ) == (127, 50)
-
-
 def test_prompt_resume_uses_last_user_only() -> None:
     p = CursorProvider()
     msgs = [

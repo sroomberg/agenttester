@@ -70,6 +70,8 @@ class TestLoadConfigPresets:
         assert "agent -p" in agents["cursor"].command
         assert "--force" in agents["cursor"].command
         assert "--trust" in agents["cursor"].command
+        assert "--output-format stream-json" in agents["cursor"].command
+        assert "--stream-partial-output" in agents["cursor"].command
 
     def test_presets_default_to_localhost(self) -> None:
         agents = load_config()

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from agenttester.agent_runner import AgentResult
 from agenttester.evaluator import EvaluatorResult
 from agenttester.git_manager import DiffStats
+from agenttester.metrics import TokenUsage
 from agenttester.report import generate_report
 
 
@@ -135,3 +136,18 @@ class TestGenerateReport:
         report = generate_report("r10", "j" * 40, "test", [result], _mock_git())
         assert "### Evaluations" not in report
         assert "### Aggregate Assessment" not in report
+
+    def test_token_usage_in_summary_and_detail(self) -> None:
+        usage = TokenUsage(input=10, output=20, cache_read=5, cache_write=2)
+        result = AgentResult("cursor", 0, 2.0, "", "", None, usage=usage)
+        report = generate_report("r-tok", "k" * 40, "test", [result], _mock_git())
+        assert "17 in / 20 out" in report
+        assert "**Token usage**" in report
+        assert "**Cache tokens**" in report
+
+    def test_missing_usage_renders_na(self) -> None:
+        result = AgentResult("claude", 0, 2.0, "", "", None)
+        report = generate_report("r-na", "l" * 40, "test", [result], _mock_git())
+        assert "| claude |" in report
+        assert "n/a" in report
+        assert "**Token usage**: n/a" in report
