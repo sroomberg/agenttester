@@ -20,7 +20,7 @@ from .config import (
     load_evaluators_and_eval_config,
 )
 from .git_manager import GitManager
-from .orchestrator import Orchestrator
+from .orchestrator import GoldenRegressionError, Orchestrator
 from .repl import run_repl
 from .server import run_server
 from .session import ReplSession
@@ -147,6 +147,31 @@ def run(
         str | None,
         typer.Option("--pem", help="SSH PEM key path for git push authentication"),
     ] = None,
+    baseline: Annotated[
+        Path | None,
+        typer.Option(
+            "--baseline",
+            help="JSON baseline file to compare metrics against",
+        ),
+    ] = None,
+    save_baseline: Annotated[
+        Path | None,
+        typer.Option(
+            "--save-baseline",
+            help="Write or update metrics in this baseline JSON file",
+        ),
+    ] = None,
+    golden: Annotated[
+        bool,
+        typer.Option(
+            "--golden",
+            help="Fail the run when baseline comparison detects a regression",
+        ),
+    ] = False,
+    no_html: Annotated[
+        bool,
+        typer.Option("--no-html", help="Skip HTML report generation"),
+    ] = False,
 ) -> None:
     """Run agents in parallel on a prompt and compare results."""
     # Resolve prompt
@@ -201,8 +226,15 @@ def run(
                 push=push,
                 remote=remote,
                 pem_path=pem,
+                baseline_path=baseline,
+                save_baseline_path=save_baseline,
+                golden=golden,
+                write_html=not no_html,
             )
         )
+    except GoldenRegressionError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from e
