@@ -28,7 +28,10 @@ PRESETS: dict[str, dict] = {
     # CURSOR_API_KEY or `agent login`. Do not pass Cursor's -w/--worktree —
     # AgentTester already isolates worktrees.
     "cursor": {
-        "command": "agent -p --force --trust {prompt}",
+        "command": (
+            "agent -p --force --trust"
+            " --output-format stream-json --stream-partial-output {prompt}"
+        ),
         "commit_style": "auto",
         "timeout": 600,
     },

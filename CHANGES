@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.0 — 2026-09-11
+- `agent-tester run`: capture Cursor CLI token usage from `--output-format stream-json` / `json` stdout; built-in `cursor` preset now enables stream-json with partial output for fair cost comparisons
+- Shared `TokenUsage` / `AgentRunMetrics` model for run reports (duration, success, tokens, optional cost); markdown reports show per-agent tokens (`n/a` when unavailable)
+- Extract Cursor usage parsing into `cursor_usage.py` (shared by shell `run` and REPL `type: cursor` provider)
+
 ## v1.6.2 — 2026-09-20
 - Republish bump after main history rewrite; same code as v1.6.1 (PyPI already has 1.6.1)
 
