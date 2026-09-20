@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from .agent_runner import AgentResult
 from .baseline import AgentComparison, format_comparison_markdown
 from .evaluator import EvaluatorResult
+from .failure_taxonomy import classify_agent_result, format_taxonomy_markdown
 from .git_manager import GitManager, branch_name
 from .metrics import format_token_detail_lines, format_token_summary
 
@@ -39,18 +40,20 @@ def generate_report(
         "",
         "## Summary",
         "",
-        "| Agent | Status | Duration | Tokens | Files | Insertions | Deletions |",
-        "|-------|--------|----------|--------|-------|------------|-----------|",
+        "| Agent | Outcome | Duration | Tokens | Files | Insertions | Deletions |",
+        "|-------|---------|----------|--------|-------|------------|-----------|",
     ]
 
     for r in results:
         stats = git.get_diff_stats(r.agent_name, run_name, base_ref)
-        status = "✅" if r.exit_code == 0 else "❌"
-        if r.error:
-            status += f" {r.error}"
+        classification = classify_agent_result(r, stats)
+        status = "✅" if classification.category == "success" else "❌"
+        outcome = f"{status} {classification.label}"
+        if r.error and classification.category not in ("timeout", "agent_error"):
+            outcome += f" ({r.error})"
         tokens = format_token_summary(r.usage)
         lines.append(
-            f"| {r.agent_name} | {status} | {r.duration:.1f}s "
+            f"| {r.agent_name} | {outcome} | {r.duration:.1f}s "
             f"| {tokens} | {stats.files_changed} | +{stats.insertions} "
             f"| -{stats.deletions} |"
         )
@@ -71,6 +74,8 @@ def generate_report(
 
     if baseline_comparisons:
         lines.extend(format_comparison_markdown(baseline_comparisons))
+
+    lines.extend(format_taxonomy_markdown(results, git, run_name, base_ref))
 
     lines.append("")
 

@@ -46,6 +46,8 @@ class TestAgentsCommand:
         assert "aider" in result.output
         assert "codex" in result.output
         assert "cursor" in result.output
+        assert "cursor-composer" in result.output
+        assert "gemini" in result.output
 
 
 class TestRunValidation:
