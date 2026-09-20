@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.11.0 — 2026-09-11
+- **Token/cost budget hard-stop**: `--max-tokens` and `--max-cost-usd` on `agent-tester run` and `agent-tester suite run`; cancels remaining agents/runs when cumulative usage exceeds the limit
+- Suite YAML `budget:` block for the same limits across a full suite
+- **CSV/JSON export**: `--export-json` and `--export-csv` on `run` and `suite run` for flat per-agent metrics (duration, tokens, cost, failure category, diff stats)
+
 ## v1.10.0 — 2026-09-11
 - Built-in presets: `cursor-composer` (pinned Composer model) and `gemini` (Google Gemini CLI)
 - **Failure taxonomy** in markdown/HTML reports: classify each agent as success, no changes, timeout, agent error, non-zero exit, or worktree failure

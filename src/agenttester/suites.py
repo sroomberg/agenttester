@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from .budget import RunBudget
 from .config import AgentConfig, _make_run_slug, load_config
 
 
@@ -45,6 +46,7 @@ class SuiteConfig:
     baseline: Path | None = None
     save_baseline: Path | None = None
     golden: bool = False
+    budget: RunBudget | None = None
 
     def validate(self) -> None:
         if not self.cases:
@@ -118,6 +120,13 @@ def load_suite(path: Path) -> SuiteConfig:
     matrix = list(data.get("matrix") or [{}])
     baseline_raw = data.get("baseline")
     save_raw = data.get("save_baseline")
+    budget_raw = data.get("budget") or {}
+    budget = None
+    if budget_raw:
+        budget = RunBudget(
+            max_tokens=budget_raw.get("max_tokens"),
+            max_cost_usd=budget_raw.get("max_cost_usd"),
+        )
     suite = SuiteConfig(
         name=str(name),
         defaults=defaults,
@@ -127,6 +136,7 @@ def load_suite(path: Path) -> SuiteConfig:
         baseline=Path(baseline_raw).expanduser() if baseline_raw else None,
         save_baseline=Path(save_raw).expanduser() if save_raw else None,
         golden=bool(data.get("golden", False)),
+        budget=budget,
     )
     suite.validate()
     return suite
