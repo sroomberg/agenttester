@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.8.0 — 2026-09-11
+- **YAML suites**: define benchmark cases, defaults, and optional matrix rows in a suite file (`examples/auth-suite.yaml`)
+- **`agent-tester suite validate`**: validate a suite and print the expanded run plan (cases × matrix)
+- **`agent-tester suite run`**: execute each expanded run sequentially via the existing orchestrator; supports `--dry-run`, retries per case/matrix row, and the same `--config` / `--repo` / `--push` flags as `run`
+- Matrix rows override `agents`, `retries`, and `timeout` for that variant; each case is run once per matrix row
+
 ## v1.7.0 — 2026-09-11
 - `agent-tester run`: capture Cursor CLI token usage from `--output-format stream-json` / `json` stdout; built-in `cursor` preset now enables stream-json with partial output for fair cost comparisons
 - Shared `TokenUsage` / `AgentRunMetrics` model for run reports (duration, success, tokens, optional cost); markdown reports show per-agent tokens (`n/a` when unavailable)
