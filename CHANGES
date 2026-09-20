@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.6.2 — 2026-09-20
+- Republish bump after main history rewrite; same code as v1.6.1 (PyPI already has 1.6.1)
+
 ## v1.6.1 — 2026-08-21
 - REPL: show time to task completion when each model finishes, persist timings in the session, and include last/total duration in `/report`
 - `agent-tester run` reports: add a fastest-first time-to-completion ranking among successful agents
